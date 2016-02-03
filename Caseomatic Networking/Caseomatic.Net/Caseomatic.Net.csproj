@@ -53,6 +53,7 @@
     <Compile Include="Utility\ConcurrentStack.cs" />
     <Compile Include="Utility\Crypto.cs" />
     <Compile Include="Utility\HuffmanCompressor.cs" />
+    <Compile Include="Utility\LineGraph.cs" />
     <Compile Include="Utility\SocketUtility.cs" />
     <Compile Include="Utility\StringCompressor.cs" />
     <Compile Include="Utility\VectorByte.cs" />
