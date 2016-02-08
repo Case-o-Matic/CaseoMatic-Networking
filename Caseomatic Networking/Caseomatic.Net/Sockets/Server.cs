@@ -21,20 +21,29 @@ namespace Caseomatic.Net
         private Thread acceptSocketsThread;
         private int connectionIdGenerationNumber = 1;
         
-        protected readonly Dictionary<int, ClientConnection> clientConnections; // ConcurrentDictionary is not available in .NET 3.5
+        protected readonly Dictionary<int, ClientConnection> clientConnections; // TODO: Implement ConcurrentDictionary
 
         private bool isHosting;
+        /// <summary>
+        /// Indicates if the server is currently hosting or not, accepting incoming connections with an underlying TCP server.
+        /// </summary>
         public bool IsHosting
         {
             get { return isHosting; }
         }
 
+        /// <summary>
+        /// The IP endpoint used by the TCP server for accepting incoming connections.
+        /// </summary>
         public IPEndPoint LocalEndPoint
         {
             get { return (IPEndPoint)server.LocalEndpoint; }
         }
 
         private ICommunicationModule communicationModule;
+        /// <summary>
+        /// The communication module that controls the conversion from bytes to packets and vice versa.
+        /// </summary>
         public ICommunicationModule CommunicationModule
         {
             get { return communicationModule; }
@@ -53,6 +62,9 @@ namespace Caseomatic.Net
             Close();
         }
 
+        /// <summary>
+        /// Starts accepting incoming connections with an underlying TCP server.
+        /// </summary>
         public void Host()
         {
             if (!isHosting)
@@ -60,6 +72,10 @@ namespace Caseomatic.Net
                 OnHost();
             }
         }
+
+        /// <summary>
+        /// Closes the TCP server and drops all connections.
+        /// </summary>
         public void Close()
         {
             if (isHosting)
@@ -68,6 +84,10 @@ namespace Caseomatic.Net
             }
         }
 
+        /// <summary>
+        /// Heartbeats a specific connection to a client.
+        /// </summary>
+        /// <param name="clientConnection">The client connectio that shall be tested.</param>
         public void HeartbeatConnection(ClientConnection clientConnection) // Put async!
         {
             var isClientConnected = clientConnection.socket.IsConnectionValid();
@@ -78,6 +98,10 @@ namespace Caseomatic.Net
             }
             // Else: Do something if connected properly?
         }
+
+        /// <summary>
+        /// Heartbeats all connections that are currently held.
+        /// </summary>
         public void HeartbeatConnections()
         {
             var clientConnectionsCopy = new ClientConnection[clientConnections.Count];
@@ -87,6 +111,11 @@ namespace Caseomatic.Net
                 HeartbeatConnection(clientConnectionsCopy[i]);
         }
 
+        /// <summary>
+        /// Disconnects a client with a specific connection-ID.
+        /// </summary>
+        /// <param name="connectionId">The connection-ID of the client that shall be disconnected.</param>
+        /// <returns>If the disconnecting of the client has worked.</returns>
         public bool DisconnectClient(int connectionId)
         {
             if (clientConnections.ContainsKey(connectionId))
@@ -102,11 +131,21 @@ namespace Caseomatic.Net
             }
             else return false;
         }
-        public void DisconnectClient(ClientConnection clientConnection)
+        /// <summary>
+        /// Disconnects a client based on a reference to its client connection.
+        /// </summary>
+        /// <param name="clientConnection">The reference to the client connection.</param>
+        /// <returns>If the disconnecting of the client has worked.</returns>
+        public bool DisconnectClient(ClientConnection clientConnection)
         {
-            DisconnectClient(clientConnection.connectionId);
+            return DisconnectClient(clientConnection.connectionId);
         }
 
+        /// <summary>
+        /// Sends a packet to an array of clients specified by their connection-IDs.
+        /// </summary>
+        /// <param name="packet">The packet that shall be sent.</param>
+        /// <param name="connectionIds">The connection-IDs of the clients this packet shall be sent to.</param>
         public void SendPacket(TServerPacket packet, params int[] connectionIds)
         {
             for (int i = 0; i < connectionIds.Length; i++)
@@ -114,6 +153,11 @@ namespace Caseomatic.Net
                 SendPacket(packet, clientConnections[connectionIds[i]]);
             }
         }
+
+        /// <summary>
+        /// Sends a packet to all connected clients.
+        /// </summary>
+        /// <param name="packet">The packet to be sent.</param>
         public void SendPacket(TServerPacket packet)
         {
             var currentClientConnections = new int[clientConnections.Count];
@@ -274,6 +318,9 @@ namespace Caseomatic.Net
         }
     }
 
+    /// <summary>
+    /// Represents a client connection containing its thread, socket and connection-ID.
+    /// </summary>
     public class ClientConnection
     {
         public readonly int connectionId;

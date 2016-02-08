@@ -13,11 +13,22 @@ namespace Caseomatic.Net
     public static class PacketConverter
     {
         private static Serializer serializer;
+
+        /// <summary>
+        /// Initializes the underlying serializer with the given types that are used as parameters for the (de)serialization methods.
+        /// </summary>
+        /// <param name="packetTypes"></param>
         public static void Initialize(Type[] packetTypes)
         {
             serializer = new Serializer(packetTypes);
         }
 
+        /// <summary>
+        /// Serializes a packet instance to an array of bytes.
+        /// </summary>
+        /// <typeparam name="T">The type of the packet that shall be serialized.</typeparam>
+        /// <param name="packet">The packet that shall be serialized.</param>
+        /// <returns>The serialized bytes.</returns>
         public static byte[] ToBytes<T>(T packet) where T : IPacket
         {
             using (var mStream = new MemoryStream())
@@ -27,6 +38,12 @@ namespace Caseomatic.Net
             }
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="bytes"></param>
+        /// <returns></returns>
         public static T ToPacket<T>(byte[] bytes) where T : IPacket
         {
             using (var mStream = new MemoryStream(bytes))
