@@ -236,7 +236,6 @@ namespace Caseomatic.Net
                 while (isConnected)
                 {
                     var serverPacket = ReceivePacket();
-
                     if (serverPacket != null)
                     {
                         receivePacketsSynchronizationStack.Push(serverPacket);
@@ -276,7 +275,7 @@ namespace Caseomatic.Net
                     }
                 }
             }
-            catch (SocketException ex)
+            catch (SocketException ex) when(ex.SocketErrorCode != SocketError.TimedOut)
             {
                 Console.WriteLine("Receiving from server resulted in a problem: " + ex.SocketErrorCode +
                     "\n" + ex.Message);

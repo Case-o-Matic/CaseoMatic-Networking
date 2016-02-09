@@ -247,14 +247,11 @@ namespace Caseomatic.Net
                     return PacketConverter.ToPacket<TClientPacket>(packetBuffer);
                 }
             }
-            catch (SocketException ex)
+            catch (SocketException ex) when(ex.SocketErrorCode != SocketError.TimedOut)
             {
-                if (ex.SocketErrorCode != SocketError.TimedOut) // A socket timeout exception is normal if no packet has been received for the last "ReceiveTimeout" ms
-                { // Use when keyword for try-catch condition?
-                    Console.WriteLine("Receiving for client " + clientConnection.connectionId + " resulted in a problem: "
-                        + ex.SocketErrorCode + "\n" + ex.Message);
-                    KickClientConnection(clientConnection.connectionId);
-                }
+                Console.WriteLine("Receiving for client " + clientConnection.connectionId + " resulted in a problem: "
+                    + ex.SocketErrorCode + "\n" + ex.Message);
+                KickClientConnection(clientConnection.connectionId);
 
                 return default(TClientPacket);
             }
