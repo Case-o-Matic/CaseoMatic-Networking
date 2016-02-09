@@ -14,9 +14,15 @@ namespace Caseomatic.Net
         where TServerPacket : IServerPacket
     {
         public delegate void OnReceivePacketHandler(TServerPacket packet);
+        /// <summary>
+        /// Called when a packet from the server is received.
+        /// </summary>
         public event OnReceivePacketHandler OnReceivePacket;
 
         public delegate void OnConnectionLostHandler();
+        /// <summary>
+        /// Called when the connection to the server is lost, noticed by an exception or heartbeat.
+        /// </summary>
         public event OnConnectionLostHandler OnConnectionLost;
 
         private Socket socket;
@@ -29,6 +35,9 @@ namespace Caseomatic.Net
         private readonly ConcurrentStack<TServerPacket> receivePacketsSynchronizationStack;
 
         private ICommunicationModule communicationModule;
+        /// <summary>
+        /// The communication module that controls the conversion from bytes to packets and vice versa.
+        /// </summary>
         public ICommunicationModule CommunicationModule
         {
             get { return communicationModule; }
@@ -36,6 +45,9 @@ namespace Caseomatic.Net
         }
 
         private bool isConnected;
+        /// <summary>
+        /// Returns if the client is currently connected. Updated by the Connect and Disconnect methods.
+        /// </summary>
         public bool IsConnected
         {
             get { return isConnected; }
@@ -54,6 +66,10 @@ namespace Caseomatic.Net
             Disconnect();
         }
 
+        /// <summary>
+        /// Connects to an IP endpoint.
+        /// </summary>
+        /// <param name="serverEndPoint">The IP endpoint that shall be connected to.</param>
         public void Connect(IPEndPoint serverEndPoint)
         {
             if (!isConnected)
@@ -61,6 +77,11 @@ namespace Caseomatic.Net
                 OnConnect(serverEndPoint);
             }
         }
+        /// <summary>
+        /// Connects to the resolved IP endpoint of a host name and port.
+        /// </summary>
+        /// <param name="hostName">The host name that shall be resolved.</param>
+        /// <param name="port">The port that shall be connected to.</param>
         public void Connect(string hostName, int port)
         {
             var serverIpAddresses = Dns.GetHostAddresses(hostName);
@@ -78,6 +99,9 @@ namespace Caseomatic.Net
             Console.WriteLine("Resolving the hostname \"" + hostName+  "\" not possible: No address of type inter-network v4 found.");
         }
 
+        /// <summary>
+        /// Disconnects the client from the server.
+        /// </summary>
         public void Disconnect()
         {
             if (isConnected)
@@ -86,6 +110,7 @@ namespace Caseomatic.Net
             }
         }
 
+        // Invokes all OnReceivePacket events of all packets that have been asynchronously received.
         public void FireEvents()
         {
             var events = receivePacketsSynchronizationStack.PopAll();
@@ -93,6 +118,11 @@ namespace Caseomatic.Net
                 OnReceivePacket(events[i]);
         }
 
+        /// <summary>
+        /// Heartbeats the connection on sending, receiving and its availability.
+        /// </summary>
+        /// <param name="repairIfBroken">Reconnects to the server if the connection is invalid.</param>
+        /// <returns>Returns if the heartbeat has been successful, if repairing is activated, returns if the repair has been successful.</returns>
         public bool HeartbeatConnection(bool repairIfBroken)
         {
             if (isConnected)
@@ -158,6 +188,10 @@ namespace Caseomatic.Net
             }
         }
 
+        /// <summary>
+        /// Sends a packet to the server.
+        /// </summary>
+        /// <param name="packet">The packet that shall be sent.</param>
         public void SendPacket(TClientPacket packet)
         {
             try
@@ -183,6 +217,13 @@ namespace Caseomatic.Net
         }
 
         #region Requests
+        /// <summary>
+        /// Sends a packet to the server and synchronously awaits the next answer.
+        /// </summary>
+        /// <typeparam name="TClientRequest">The type of the packet that is sent.</typeparam>
+        /// <typeparam name="TServerAnswer">The type of the packet that shall be received.</typeparam>
+        /// <param name="requestPacket">The request packet that is sent.</param>
+        /// <returns>The answer packet from the server.</returns>
         public TServerAnswer SendRequest<TClientRequest, TServerAnswer>(TClientRequest requestPacket)
             where TClientRequest : TClientPacket, IPacketRequestable where TServerAnswer : TServerPacket
         {
@@ -198,6 +239,14 @@ namespace Caseomatic.Net
                 return default(TServerAnswer);
         }
 
+        /// <summary>
+        /// Sends a request and indicates if a proper answer has been received.
+        /// </summary>
+        /// <typeparam name="TClientRequest">The type of the packet that is sent.</typeparam>
+        /// <typeparam name="TServerAnswer">The type of the packet that shall be received.</typeparam>
+        /// <param name="requestPacket">The request packet that is sent.</param>
+        /// <param name="answerPacket">The answer packet that shall be received.</param>
+        /// <returns>States if a proper answer has been received.</returns>
         public bool TrySendRequest<TClientRequest, TServerAnswer>(TClientRequest requestPacket, out TServerAnswer answerPacket)
             where TClientRequest : TClientPacket, IPacketRequestable where TServerAnswer : TServerPacket
         {
@@ -205,6 +254,13 @@ namespace Caseomatic.Net
             return !answerPacket.Equals(default(TServerAnswer));
         }
 
+        /// <summary>
+        /// Sends a request to the server and asynchronously awaits a proper answer from the server.
+        /// </summary>
+        /// <typeparam name="TClientRequest">The type of the packet that is sent.</typeparam>
+        /// <typeparam name="TServerAnswer">The type of the packet that shall be sent.</typeparam>
+        /// <param name="requestPacket">The request packet that is sent.</param>
+        /// <returns>The answer packet from the server.</returns>
         public TServerAnswer SendRequestAsync<TClientRequest, TServerAnswer>(TClientRequest requestPacket)
             where TClientRequest : TClientPacket, IPacketRequestable where TServerAnswer : TServerPacket
         {
@@ -221,6 +277,9 @@ namespace Caseomatic.Net
                 return serverAnswerPacket;
         }
 
+        /// <summary>
+        /// Combines the TrySendRequest and SendRequestAsync methods.
+        /// </summary>
         public bool TrySendRequestAsync<TClientRequest, TServerAnswer>(TClientRequest requestPacket, out TServerAnswer answerPacket) where TClientRequest : TClientPacket, IPacketRequestable
             where TServerAnswer : TServerPacket
         {
@@ -251,6 +310,10 @@ namespace Caseomatic.Net
             }
         }
 
+        /// <summary>
+        /// Synchronously receives a packet from the server.
+        /// </summary>
+        /// <returns>The received packet from the server, or the default type value if the method malfunctioned.</returns>
         private TServerPacket ReceivePacket()
         {
             try
@@ -285,7 +348,11 @@ namespace Caseomatic.Net
             }
         }
 
-        private void RepairConnection()
+        /// <summary>
+        /// Repairs the connection by disconnecting, sending a ping and reconnecting under the same circumstances, heartbeating to check if it worked.
+        /// </summary>
+        /// <returns></returns>
+        private bool RepairConnection()
         {
             // The endpoint the client is currently connected to
             var remoteEndPoint = (IPEndPoint)socket.RemoteEndPoint;
@@ -299,11 +366,12 @@ namespace Caseomatic.Net
                 Console.WriteLine("Reconnecting to server");
 
                 Connect(remoteEndPoint);
-                HeartbeatConnection(false);
+                return HeartbeatConnection(false);
             }
             else
             {
                 Console.WriteLine("IP not pingable. Result: " + pReply.Status + ", dropping off");
+                return false;
             }
         }
     }

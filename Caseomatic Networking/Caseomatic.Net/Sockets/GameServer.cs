@@ -19,16 +19,20 @@ namespace Caseomatic.Net
             multicastEndPoint = new IPEndPoint(multicastAddress, 0);
 
             udpClient = new UdpClient(port + 1, AddressFamily.InterNetwork); // Change the port number increment
-            udpClient.JoinMulticastGroup(multicastEndPoint.Address);
+            udpClient.JoinMulticastGroup(multicastAddress);
             // udpClient.Ttl = 42; // Default = 32, higher values need more bandwidth
         }
 
+        /// <summary>
+        /// Sends a multicast packet with the underlying UDP client.
+        /// </summary>
+        /// <param name="packet">The packet you want to send.</param>
         public void SendMulticastPacket(TServerPacket packet)
         {
             var packetBytes = PacketConverter.ToBytes(packet);
             udpClient.Send(packetBytes, packetBytes.Length, multicastEndPoint);
         }
-
+        
         protected override void OnClose()
         {
             udpClient.DropMulticastGroup(multicastEndPoint.Address); // Is this really needed?

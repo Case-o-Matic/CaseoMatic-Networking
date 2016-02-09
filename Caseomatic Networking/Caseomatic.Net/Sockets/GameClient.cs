@@ -9,6 +9,9 @@ namespace Caseomatic.Net
     public class GameClient<TClientPacket, TServerPacket> : Client<TClientPacket, TServerPacket>
         where TClientPacket : IClientPacket where TServerPacket : IServerPacket
     {
+        /// <summary>
+        /// Called when a UDP multicast from the server is received.
+        /// </summary>
         public event OnReceivePacketHandler OnReceiveUdpPacket;
 
         private readonly UdpClient udpClient;
