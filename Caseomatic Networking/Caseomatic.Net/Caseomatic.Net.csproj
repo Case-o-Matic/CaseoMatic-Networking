@@ -50,6 +50,7 @@
     <Compile Include="Sockets\GameClient.cs" />
     <Compile Include="Sockets\GameServer.cs" />
     <Compile Include="Sockets\Server.cs" />
+    <Compile Include="Utility\ConcurrentDictionary.cs" />
     <Compile Include="Utility\ConcurrentStack.cs" />
     <Compile Include="Utility\Crypto.cs" />
     <Compile Include="Utility\HuffmanCompressor.cs" />

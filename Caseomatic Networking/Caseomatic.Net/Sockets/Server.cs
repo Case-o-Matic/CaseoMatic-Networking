@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Linq;
+using Caseomatic.Net.Utility;
 
 namespace Caseomatic.Net
 {
@@ -20,8 +21,10 @@ namespace Caseomatic.Net
         private TcpListener server;
         private Thread acceptSocketsThread;
         private int connectionIdGenerationNumber = 1;
+        private readonly ConcurrentStack<int> lostConnectionsBuffer;
         
-        protected readonly Dictionary<int, ClientConnection> clientConnections; // TODO: Implement ConcurrentDictionary
+        protected readonly ConcurrentDictionary<int, ClientConnection> clientConnections;
+        protected readonly ConcurrentStack<ClientPacketPair> receivePacketsBuffer;
 
         private bool isHosting;
         /// <summary>
@@ -46,16 +49,24 @@ namespace Caseomatic.Net
         /// </summary>
         public ICommunicationModule CommunicationModule
         {
-            get { return communicationModule; }
-            set { communicationModule = value; }
+            get
+            {
+                return communicationModule;
+            }
+            set
+            {
+                communicationModule = value;
+            }
         }
 
         public Server(int port)
         {
             server = new TcpListener(new IPEndPoint(IPAddress.Any, port));
-            clientConnections = new Dictionary<int, ClientConnection>();
+            clientConnections = new ConcurrentDictionary<int, ClientConnection>();
+            lostConnectionsBuffer = new ConcurrentStack<int>();
 
             communicationModule = new DefaultCommunicationModule();
+            receivePacketsBuffer = new ConcurrentStack<ClientPacketPair>();
         }
         ~Server()
         {
@@ -85,6 +96,30 @@ namespace Caseomatic.Net
         }
 
         /// <summary>
+        /// Invokes all OnReceiveClientPacket events of all packets that have been asynchronously received. 
+        /// Invokes all OnClientConnectionLost events that have been asynchronously ordered.
+        /// </summary>
+        public virtual void FireEvents()
+        {
+            if (!isHosting)
+                return;
+
+            if (OnReceiveClientPacket != null)
+            {
+                var events = receivePacketsBuffer.PopAll();
+                foreach (var ev in events)
+                    OnReceiveClientPacket(ev.connectionId, ev.packet);
+            }
+
+            if (OnClientConnectionLost != null)
+            {
+                var lostConnections = lostConnectionsBuffer.PopAll();
+                for (int i = 0; i < lostConnections.Length; i++)
+                    OnClientConnectionLost(lostConnections[i]);
+            }
+        }
+
+        /// <summary>
         /// Heartbeats a specific connection to a client.
         /// </summary>
         /// <param name="clientConnection">The client connectio that shall be tested.</param>
@@ -105,7 +140,7 @@ namespace Caseomatic.Net
         public void HeartbeatConnections()
         {
             var clientConnectionsCopy = new ClientConnection[clientConnections.Count];
-            clientConnections.Values.CopyTo(clientConnectionsCopy, 0);
+            clientConnections.AllValues.CopyTo(clientConnectionsCopy, 0);
 
             for (int i = 0; i < clientConnectionsCopy.Length; i++)
                 HeartbeatConnection(clientConnectionsCopy[i]);
@@ -161,7 +196,7 @@ namespace Caseomatic.Net
         public void SendPacket(TServerPacket packet)
         {
             var currentClientConnections = new int[clientConnections.Count];
-            clientConnections.Keys.CopyTo(currentClientConnections, 0);
+            clientConnections.AllKeys.CopyTo(currentClientConnections, 0);
 
             SendPacket(packet, currentClientConnections);
         }
@@ -172,7 +207,7 @@ namespace Caseomatic.Net
             {
                 try
                 {
-                    var packetBytes = PacketConverter.ToBytes(packet);
+                    var packetBytes = CommunicationModule.ConvertSend(packet);
                     var sentBytes = clientConnection.socket.Send(packetBytes);
 
                     if (sentBytes == 0)
@@ -201,7 +236,7 @@ namespace Caseomatic.Net
             isHosting = false;
             server.Stop();
             
-            var connectedConnectionIds = clientConnections.Values.ToArray();
+            var connectedConnectionIds = clientConnections.AllValues.ToArray();
             foreach (var connectionId in connectedConnectionIds)
             {
                 DisconnectClient(connectionId);
@@ -256,12 +291,11 @@ namespace Caseomatic.Net
                 while (isHosting && !clientConnection.terminate)
                 {
                     var clientPacket = ReceivePacket(clientConnection);
-
-                    var onReceiveClientPacket = OnReceiveClientPacket;
-                    if (onReceiveClientPacket != null && clientPacket != null)
+                    if (clientPacket != null)
                     {
-                        onReceiveClientPacket(connectionId, clientPacket);
+                        receivePacketsBuffer.Push(new ClientPacketPair(connectionId, clientPacket));
                     }
+                    // Else: Packet is corrupted
                 }
             }
             catch (Exception ex)
@@ -285,10 +319,7 @@ namespace Caseomatic.Net
                 }
                 else
                 {
-                    var packetBuffer = new byte[receivedBytes]; // Alternative: Dont copy into new array but directly pass the clientConnection.packetReceivingBuffer to the packet converter
-                    Buffer.BlockCopy(clientConnection.packetReceivingBuffer, 0, packetBuffer, 0, receivedBytes);
-
-                    return PacketConverter.ToPacket<TClientPacket>(packetBuffer);
+                    return CommunicationModule.ConvertReceive<TClientPacket>(clientConnection.packetReceivingBuffer);
                 }
             }
             catch (SocketException ex) when(ex.SocketErrorCode != SocketError.TimedOut)
@@ -305,13 +336,24 @@ namespace Caseomatic.Net
         {
             if (DisconnectClient(connectionId))
             {
-                if (OnClientConnectionLost != null)
-                    OnClientConnectionLost(connectionId);
+                lostConnectionsBuffer.Push(connectionId);
             }
         }
         private void KickClientConnection(ClientConnection clientConnection)
         {
             KickClientConnection(clientConnection.connectionId);
+        }
+
+        protected struct ClientPacketPair
+        {
+            public readonly int connectionId;
+            public readonly TClientPacket packet;
+
+            public ClientPacketPair(int connectionId, TClientPacket packet)
+            {
+                this.connectionId = connectionId;
+                this.packet = packet;
+            }
         }
     }
 
@@ -336,10 +378,10 @@ namespace Caseomatic.Net
         }
     }
 
-    public enum ErrorType
-    {
-        ZeroBytesReceived,
-        ZeroBytesSent,
-        NoHeartbeat
-    }
+    //public enum ErrorType
+    //{
+    //    ZeroBytesReceived,
+    //    ZeroBytesSent,
+    //    NoHeartbeat
+    //}
 }

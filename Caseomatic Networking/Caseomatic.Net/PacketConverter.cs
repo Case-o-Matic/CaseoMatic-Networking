@@ -12,7 +12,8 @@ namespace Caseomatic.Net
 {
     public static class PacketConverter
     {
-        private static Serializer serializer;
+        private static Serializer serializer; // Or thread-static instead of locked?
+        private static object serializerLock;
 
         /// <summary>
         /// Initializes the underlying serializer with the given types that are used as parameters for the (de)serialization methods.
@@ -21,6 +22,7 @@ namespace Caseomatic.Net
         public static void Initialize(Type[] packetTypes)
         {
             serializer = new Serializer(packetTypes);
+            serializerLock = new object();
         }
 
         /// <summary>
@@ -31,10 +33,13 @@ namespace Caseomatic.Net
         /// <returns>The serialized bytes.</returns>
         public static byte[] ToBytes<T>(T packet) where T : IPacket
         {
-            using (var mStream = new MemoryStream())
+            lock (serializerLock)
             {
-                serializer.Serialize(mStream, packet);
-                return mStream.ToArray();
+                using (var mStream = new MemoryStream())
+                {
+                    serializer.Serialize(mStream, packet);
+                    return mStream.ToArray();
+                }
             }
         }
 
@@ -46,10 +51,13 @@ namespace Caseomatic.Net
         /// <returns></returns>
         public static T ToPacket<T>(byte[] bytes) where T : IPacket
         {
-            using (var mStream = new MemoryStream(bytes))
+            lock (serializerLock)
             {
-                var deserializedObj = serializer.Deserialize(mStream);
-                return deserializedObj != null ? (T)deserializedObj : default(T);
+                using (var mStream = new MemoryStream(bytes))
+                {
+                    var deserializedObj = serializer.Deserialize(mStream);
+                    return deserializedObj != null ? (T)deserializedObj : default(T);
+                }
             }
         }
 
@@ -61,6 +69,8 @@ namespace Caseomatic.Net
         // Flags:
         //  1. Huffman-compress
         //  2. Encrypt
+
+        // TODO: Implement serializer-lock here when used, so that you dont need to double lock the ToBytes and HuffmanCompressor methods
         public static byte[] ToFlexBytes<T>(T packet, bool compress, bool encrypt) where T : IPacket
         {
             var bytes = ToBytes(packet);

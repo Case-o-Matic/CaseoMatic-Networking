@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Caseomatic.Net.Utility;
+using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
@@ -15,20 +16,48 @@ namespace Caseomatic.Net
         public event OnReceivePacketHandler OnReceiveUdpPacket;
 
         private readonly UdpClient udpClient;
-        private readonly IPAddress multicastAddress;
+        private readonly IPEndPoint multicastEndPoint;
+        private ConcurrentStack<TServerPacket> receivePacketsUdpSynchronizationStack;
+        private object udpClientReceiveLockObj;
 
         public GameClient(int port, IPAddress multicastAddress)
             : base(port)
         {
-            udpClient = new UdpClient(port + 1, AddressFamily.InterNetwork);
+            multicastEndPoint = new IPEndPoint(multicastAddress, port + 1);
+            udpClient = new UdpClient(multicastEndPoint.Port, AddressFamily.InterNetwork);
 
-            this.multicastAddress = multicastAddress;
             udpClient.JoinMulticastGroup(multicastAddress);
+            receivePacketsUdpSynchronizationStack = new ConcurrentStack<TServerPacket>();
+            udpClientReceiveLockObj = new object();
         }
         ~GameClient()
         {
-            udpClient.DropMulticastGroup(multicastAddress); // Is this really needed?
+            udpClient.DropMulticastGroup(multicastEndPoint.Address); // Is this really needed?
             udpClient.Close();
+        }
+
+        public void SendMulticastPacket(TClientPacket packet)
+        {
+            lock (udpClientReceiveLockObj)
+            {
+                if (IsConnected)
+                {
+                    var bytes = CommunicationModule.ConvertSend(packet);
+                    udpClient.Send(bytes, bytes.Length, ServerEndPoint);
+                }
+            }
+        }
+
+        public override void FireEvents()
+        {
+            if (OnReceiveUdpPacket != null)
+            {
+                var events = receivePacketsUdpSynchronizationStack.PopAll();
+                for (int i = 0; i < events.Length; i++)
+                    OnReceiveUdpPacket(events[i]);
+            }
+
+            base.FireEvents();
         }
 
         protected override void OnConnect(IPEndPoint serverEndPoint)
@@ -42,17 +71,23 @@ namespace Caseomatic.Net
 
         private void ReceiveMulticastPacketsLoop()
         {
-            while (IsConnected)
+            try
             {
-                var senderEndPoint = new IPEndPoint(IPAddress.Any, 1);
-                var buffer = udpClient.Receive(ref senderEndPoint);
-
-                if (buffer != null &&
-                    senderEndPoint.Address == multicastAddress && // Check if the multicast packet sender is valid
-                    OnReceiveUdpPacket != null)
+                while (IsConnected)
                 {
-                    OnReceiveUdpPacket(PacketConverter.ToPacket<TServerPacket>(buffer));
+                    var senderEndPoint = new IPEndPoint(IPAddress.Any, 1);
+                    var buffer = udpClient.Receive(ref senderEndPoint);
+
+                    if (buffer != null &&
+                        senderEndPoint == multicastEndPoint)
+                    {
+                        receivePacketsUdpSynchronizationStack.Push(CommunicationModule.ConvertReceive<TServerPacket>(buffer));
+                    }
                 }
+            }
+            catch (SocketException ex) when(ex.SocketErrorCode != SocketError.TimedOut)
+            {
+                Console.WriteLine("Receiving on the UDP client has brought an error: " + ex.Message);
             }
         }
     }
@@ -70,7 +105,7 @@ namespace Caseomatic.Net
         if (OperationalStatus.Up != adapter.OperationalStatus)
             continue; // this adapter is off or not connected
         IPv4InterfaceProperties p = adapter.GetIPProperties().GetIPv4Properties();
-        if (null == p)
+        if (p == null)
             continue; // IPv4 is not configured on this adapter
         my_sock.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, (int)IPAddress.HostToNetworkOrder(p.Index));
     }

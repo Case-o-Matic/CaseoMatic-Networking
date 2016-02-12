@@ -31,6 +31,7 @@ namespace Caseomatic.Net
         private byte[] packetReceivingBuffer;
         private object packetReceivingLock;
         private readonly int port;
+        private bool isConnectionLost;
 
         private readonly ConcurrentStack<TServerPacket> receivePacketsSynchronizationStack;
 
@@ -40,8 +41,14 @@ namespace Caseomatic.Net
         /// </summary>
         public ICommunicationModule CommunicationModule
         {
-            get { return communicationModule; }
-            set { communicationModule = value; }
+            get
+            {
+                return communicationModule;
+            }
+            set
+            {
+                communicationModule = value;
+            }
         }
 
         private bool isConnected;
@@ -51,6 +58,11 @@ namespace Caseomatic.Net
         public bool IsConnected
         {
             get { return isConnected; }
+        }
+
+        public IPEndPoint ServerEndPoint
+        {
+            get { return (IPEndPoint)socket.RemoteEndPoint; }
         }
 
         public Client(int port)
@@ -72,9 +84,10 @@ namespace Caseomatic.Net
         /// <param name="serverEndPoint">The IP endpoint that shall be connected to.</param>
         public void Connect(IPEndPoint serverEndPoint)
         {
-            if (!isConnected)
+            lock (packetReceivingLock)
             {
-                OnConnect(serverEndPoint);
+                if (!isConnected)
+                    OnConnect(serverEndPoint);
             }
         }
         /// <summary>
@@ -104,18 +117,31 @@ namespace Caseomatic.Net
         /// </summary>
         public void Disconnect()
         {
-            if (isConnected)
+            lock (receivePacketsThread)
             {
-                OnDisconnect();
+                if (isConnected)
+                    OnDisconnect();
             }
         }
 
-        // Invokes all OnReceivePacket events of all packets that have been asynchronously received.
-        public void FireEvents()
+        /// <summary>
+        /// Invokes all OnReceivePacket events of all packets that have been asynchronously received. 
+        /// Invokes all OnClientConnectionLost events that have been asynchronously ordered.
+        /// </summary>
+        public virtual void FireEvents()
         {
-            var events = receivePacketsSynchronizationStack.PopAll();
-            for (int i = 0; i < events.Length; i++)
-                OnReceivePacket(events[i]);
+            if (!isConnected)
+                return;
+
+            if (OnReceivePacket != null)
+            {
+                var events = receivePacketsSynchronizationStack.PopAll();
+                for (int i = 0; i < events.Length; i++)
+                    OnReceivePacket(events[i]);
+            }
+
+            if (isConnectionLost && OnConnectionLost != null)
+                OnConnectionLost();
         }
 
         /// <summary>
@@ -125,28 +151,29 @@ namespace Caseomatic.Net
         /// <returns>Returns if the heartbeat has been successful, if repairing is activated, returns if the repair has been successful.</returns>
         public bool HeartbeatConnection(bool repairIfBroken)
         {
-            if (isConnected)
+            lock (packetReceivingLock)
             {
-                var isReallyConnected = socket.IsConnectionValid();
-                if (!isReallyConnected)
+                if (isConnected)
                 {
-                    Console.WriteLine("The server shows no heartbeat" + (repairIfBroken ?
-                        ", trying to repair connection" : ", disconnecting"));
+                    var isReallyConnected = socket.IsConnectionValid();
+                    if (!isReallyConnected)
+                    {
+                        Console.WriteLine("The server shows no heartbeat" + (repairIfBroken ?
+                            ", trying to repair connection" : ", disconnecting"));
 
-                    Disconnect();
-                    if (OnConnectionLost != null)
-                        OnConnectionLost();
+                        Disconnect();
+                        isConnectionLost = true;
 
-                    if (repairIfBroken)
-                        RepairConnection();
+                        if (repairIfBroken)
+                            RepairConnection();
+                    }
+
+                    return isReallyConnected;
                 }
-
-                return isReallyConnected;
+                else
+                    return false;
             }
-            else
-                return false;
         }
-
 
         protected virtual void OnConnect(IPEndPoint serverEndPoint)
         {
@@ -194,25 +221,28 @@ namespace Caseomatic.Net
         /// <param name="packet">The packet that shall be sent.</param>
         public void SendPacket(TClientPacket packet)
         {
-            try
+            lock (packetReceivingLock)
             {
-                if (isConnected)
+                try
                 {
-                    var packetBytes = communicationModule.ConvertSend<TClientPacket>(packet);
-                    var sentBytes = socket.Send(packetBytes);
-
-                    if (sentBytes == 0)
+                    if (isConnected)
                     {
-                        Console.WriteLine("Sending to server resulted in a problem: Peer not reached");
-                        HeartbeatConnection(false);
+                        var packetBytes = CommunicationModule.ConvertSend(packet);
+                        var sentBytes = socket.Send(packetBytes);
+
+                        if (sentBytes == 0)
+                        {
+                            Console.WriteLine("Sending to server resulted in a problem: Peer not reached");
+                            HeartbeatConnection(false);
+                        }
                     }
                 }
-            }
-            catch (SocketException ex)
-            {
-                Console.WriteLine("Sending to the server resulted in a problem: " + ex.SocketErrorCode +
-                    "\n" + ex.Message);
-                HeartbeatConnection(true);
+                catch (SocketException ex)
+                {
+                    Console.WriteLine("Sending to the server resulted in a problem: " + ex.SocketErrorCode +
+                        "\n" + ex.Message);
+                    HeartbeatConnection(true);
+                }
             }
         }
 
@@ -331,10 +361,7 @@ namespace Caseomatic.Net
                     }
                     else
                     {
-                        var packetBuffer = new byte[receivedBytes];
-                        Buffer.BlockCopy(packetReceivingBuffer, 0, packetBuffer, 0, receivedBytes);
-
-                        return communicationModule.ConvertReceive<TServerPacket>(packetBuffer);
+                        return CommunicationModule.ConvertReceive<TServerPacket>(packetReceivingBuffer);
                     }
                 }
             }
