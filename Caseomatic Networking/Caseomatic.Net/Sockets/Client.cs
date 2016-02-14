@@ -151,28 +151,28 @@ namespace Caseomatic.Net
         /// <returns>Returns if the heartbeat has been successful, if repairing is activated, returns if the repair has been successful.</returns>
         public bool HeartbeatConnection(bool repairIfBroken)
         {
-            lock (packetReceivingLock)
+            if (isConnected)
             {
-                if (isConnected)
+                bool isReallyConnected;
+                lock (packetReceivingLock)
+                    isReallyConnected = socket.IsConnectionValid();
+
+                if (!isReallyConnected)
                 {
-                    var isReallyConnected = socket.IsConnectionValid();
-                    if (!isReallyConnected)
-                    {
-                        Console.WriteLine("The server shows no heartbeat" + (repairIfBroken ?
-                            ", trying to repair connection" : ", disconnecting"));
+                    Console.WriteLine("The server shows no heartbeat" + (repairIfBroken ?
+                        ", trying to repair connection" : ", disconnecting"));
 
-                        Disconnect();
-                        isConnectionLost = true;
+                    Disconnect();
+                    isConnectionLost = true;
 
-                        if (repairIfBroken)
-                            RepairConnection();
-                    }
-
-                    return isReallyConnected;
+                    if (repairIfBroken)
+                        RepairConnection();
                 }
-                else
-                    return false;
+
+                return isReallyConnected;
             }
+            else
+                return false;
         }
 
         protected virtual void OnConnect(IPEndPoint serverEndPoint)
@@ -221,28 +221,31 @@ namespace Caseomatic.Net
         /// <param name="packet">The packet that shall be sent.</param>
         public void SendPacket(TClientPacket packet)
         {
-            lock (packetReceivingLock)
+            try
             {
-                try
+                if (isConnected)
                 {
-                    if (isConnected)
-                    {
-                        var packetBytes = CommunicationModule.ConvertSend(packet);
-                        var sentBytes = socket.Send(packetBytes);
+                    byte[] packetBytes;
+                    int sentBytes;
 
-                        if (sentBytes == 0)
-                        {
-                            Console.WriteLine("Sending to server resulted in a problem: Peer not reached");
-                            HeartbeatConnection(false);
-                        }
+                    lock (packetReceivingLock)
+                    {
+                        packetBytes = CommunicationModule.ConvertSend(packet);
+                        sentBytes = socket.Send(packetBytes);
+                    }
+
+                    if (sentBytes == 0)
+                    {
+                        Console.WriteLine("Sending to server resulted in a problem: Peer not reached");
+                        HeartbeatConnection(false);
                     }
                 }
-                catch (SocketException ex)
-                {
-                    Console.WriteLine("Sending to the server resulted in a problem: " + ex.SocketErrorCode +
-                        "\n" + ex.Message);
-                    HeartbeatConnection(true);
-                }
+            }
+            catch (SocketException ex)
+            {
+                Console.WriteLine("Sending to the server resulted in a problem: " + ex.SocketErrorCode +
+                    "\n" + ex.Message);
+                HeartbeatConnection(true);
             }
         }
 
@@ -351,19 +354,16 @@ namespace Caseomatic.Net
                 lock (packetReceivingLock)
                 {
                     var receivedBytes = socket.Receive(packetReceivingBuffer);
-
-                    if (receivedBytes == 0)
-                    {
-                        Console.WriteLine("Receiving from server resulted in a problem: 0 bytes received");
-                        Disconnect();
-
-                        return default(TServerPacket);
-                    }
-                    else
+                    if (receivedBytes != 0)
                     {
                         return CommunicationModule.ConvertReceive<TServerPacket>(packetReceivingBuffer);
                     }
                 }
+
+                Console.WriteLine("Receiving from server resulted in a problem: 0 bytes received");
+                Disconnect();
+
+                return default(TServerPacket);
             }
             catch (SocketException ex) when(ex.SocketErrorCode != SocketError.TimedOut)
             {
@@ -382,7 +382,11 @@ namespace Caseomatic.Net
         private bool RepairConnection()
         {
             // The endpoint the client is currently connected to
-            var remoteEndPoint = (IPEndPoint)socket.RemoteEndPoint;
+            IPEndPoint remoteEndPoint;
+            lock (packetReceivingLock)
+            {
+                remoteEndPoint = (IPEndPoint)socket.RemoteEndPoint;
+            }
             Disconnect();
 
             var ping = new Ping();
