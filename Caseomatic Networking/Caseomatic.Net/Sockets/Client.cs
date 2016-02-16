@@ -29,7 +29,7 @@ namespace Caseomatic.Net
         private Thread receivePacketsThread;
 
         private byte[] packetReceivingBuffer;
-        private object packetReceivingLock;
+        private object socketLock;
         private readonly int port;
         private bool isConnectionLost;
 
@@ -68,7 +68,7 @@ namespace Caseomatic.Net
         public Client(int port)
         {
             this.port = port;
-            packetReceivingLock = new object();
+            socketLock = new object();
 
             receivePacketsSynchronizationStack = new ConcurrentStack<TServerPacket>();
             communicationModule = new DefaultCommunicationModule();
@@ -84,11 +84,8 @@ namespace Caseomatic.Net
         /// <param name="serverEndPoint">The IP endpoint that shall be connected to.</param>
         public void Connect(IPEndPoint serverEndPoint)
         {
-            lock (packetReceivingLock)
-            {
-                if (!isConnected)
-                    OnConnect(serverEndPoint);
-            }
+            if (!isConnected)
+                OnConnect(serverEndPoint);
         }
         /// <summary>
         /// Connects to the resolved IP endpoint of a host name and port.
@@ -117,11 +114,8 @@ namespace Caseomatic.Net
         /// </summary>
         public void Disconnect()
         {
-            lock (receivePacketsThread)
-            {
-                if (isConnected)
-                    OnDisconnect();
-            }
+            if (isConnected)
+                OnDisconnect();
         }
 
         /// <summary>
@@ -154,7 +148,7 @@ namespace Caseomatic.Net
             if (isConnected)
             {
                 bool isReallyConnected;
-                lock (packetReceivingLock)
+                lock (socketLock)
                     isReallyConnected = socket.IsConnectionValid();
 
                 if (!isReallyConnected)
@@ -179,13 +173,16 @@ namespace Caseomatic.Net
         {
             try
             {
-                socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                socket.Bind(new IPEndPoint(IPAddress.Any, port));
+                lock (socketLock)
+                {
+                    socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    socket.Bind(new IPEndPoint(IPAddress.Any, port));
 
-                socket.ConfigureInitialSocket();
+                    socket.ConfigureInitialSocket();
 
-                socket.Connect(serverEndPoint);
-                packetReceivingBuffer = new byte[socket.ReceiveBufferSize];
+                    socket.Connect(serverEndPoint);
+                    packetReceivingBuffer = new byte[socket.ReceiveBufferSize];
+                }
 
                 isConnected = true;
 
@@ -199,6 +196,7 @@ namespace Caseomatic.Net
                 Disconnect();
             }
         }
+
         protected virtual void OnDisconnect()
         {
             try
@@ -228,7 +226,7 @@ namespace Caseomatic.Net
                     byte[] packetBytes;
                     int sentBytes;
 
-                    lock (packetReceivingLock)
+                    lock (socketLock)
                     {
                         packetBytes = CommunicationModule.ConvertSend(packet);
                         sentBytes = socket.Send(packetBytes);
@@ -297,17 +295,23 @@ namespace Caseomatic.Net
         public TServerAnswer SendRequestAsync<TClientRequest, TServerAnswer>(TClientRequest requestPacket)
             where TClientRequest : TClientPacket, IPacketRequestable where TServerAnswer : TServerPacket
         {
-            TServerAnswer serverAnswerPacket = default(TServerAnswer);
-            object lockObj = new object();
-            var rcvThread = new Thread(() =>
+            if (isConnected)
             {
-                lock (lockObj)
-                    serverAnswerPacket = (TServerAnswer)ReceivePacket();
-            });
-            rcvThread.Start();
+                TServerAnswer serverAnswerPacket = default(TServerAnswer);
+                object lockObj = new object();
 
-            lock (lockObj)
-                return serverAnswerPacket;
+                var rcvThread = new Thread(() =>
+                {
+                    lock (lockObj)
+                        serverAnswerPacket = SendRequest<TClientRequest, TServerAnswer>(requestPacket);
+                });
+                rcvThread.Start();
+
+                lock (lockObj)
+                    return serverAnswerPacket;
+            }
+            else
+                return default(TServerAnswer);
         }
 
         /// <summary>
@@ -351,7 +355,7 @@ namespace Caseomatic.Net
         {
             try
             {
-                lock (packetReceivingLock)
+                lock (socketLock)
                 {
                     var receivedBytes = socket.Receive(packetReceivingBuffer);
                     if (receivedBytes != 0)
@@ -383,7 +387,7 @@ namespace Caseomatic.Net
         {
             // The endpoint the client is currently connected to
             IPEndPoint remoteEndPoint;
-            lock (packetReceivingLock)
+            lock (socketLock)
             {
                 remoteEndPoint = (IPEndPoint)socket.RemoteEndPoint;
             }
