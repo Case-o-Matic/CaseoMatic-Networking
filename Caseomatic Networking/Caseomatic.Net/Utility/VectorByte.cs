@@ -34,5 +34,9 @@ namespace Caseomatic.Net
         {
             return (byte)vByte.bitVector.Data;
         }
+        public static implicit operator VectorByte(byte b)
+        {
+            return new VectorByte(b);
+        }
     }
 }

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 
 namespace Caseomatic.Net
 {
@@ -19,20 +20,24 @@ namespace Caseomatic.Net
         private readonly IPEndPoint multicastEndPoint;
         private ConcurrentStack<TServerPacket> receivePacketsUdpSynchronizationStack;
         private object udpClientReceiveLockObj;
+        private byte[] udpClientReceiveBuffer;
+        private Thread udpReceiveThread;
 
         public GameClient(int port, IPAddress multicastAddress)
             : base(port)
         {
             multicastEndPoint = new IPEndPoint(multicastAddress, port + 1);
             udpClient = new UdpClient(multicastEndPoint.Port, AddressFamily.InterNetwork);
+            // Customize TTL? (default is 32)
 
             udpClient.JoinMulticastGroup(multicastAddress);
             receivePacketsUdpSynchronizationStack = new ConcurrentStack<TServerPacket>();
             udpClientReceiveLockObj = new object();
+            udpClientReceiveBuffer = new byte[udpClient.Client.ReceiveBufferSize];
         }
         ~GameClient()
         {
-            udpClient.DropMulticastGroup(multicastEndPoint.Address); // Is this really needed?
+            udpClient.DropMulticastGroup(multicastEndPoint.Address);
             udpClient.Close();
         }
 
@@ -62,12 +67,11 @@ namespace Caseomatic.Net
 
         protected override void OnConnect(IPEndPoint serverEndPoint)
         {
+            udpReceiveThread = new Thread(ReceiveMulticastPacketsLoop);
+            udpReceiveThread.Start();
+
             base.OnConnect(serverEndPoint);
-        }
-        protected override void OnDisconnect()
-        {
-            base.OnDisconnect();
-        }
+        } // Joining the receive-thread to stop it is not done in OnDisconnect as the thread should run out naturally
 
         private void ReceiveMulticastPacketsLoop()
         {
@@ -76,12 +80,14 @@ namespace Caseomatic.Net
                 while (IsConnected)
                 {
                     var senderEndPoint = new IPEndPoint(IPAddress.Any, 1);
-                    var buffer = udpClient.Receive(ref senderEndPoint);
+                    lock (udpClientReceiveLockObj)
+                        udpClientReceiveBuffer = udpClient.Receive(ref senderEndPoint);
 
-                    if (buffer != null &&
+                    if (udpClientReceiveBuffer != null &&
                         senderEndPoint == multicastEndPoint)
                     {
-                        receivePacketsUdpSynchronizationStack.Push(CommunicationModule.ConvertReceive<TServerPacket>(buffer));
+                        receivePacketsUdpSynchronizationStack.Push(
+                            CommunicationModule.ConvertReceive<TServerPacket>(udpClientReceiveBuffer));
                     }
                 }
             }

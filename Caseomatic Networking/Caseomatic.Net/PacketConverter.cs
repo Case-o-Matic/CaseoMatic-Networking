@@ -7,6 +7,7 @@ using System.Text;
 using System.Linq;
 using System.Diagnostics;
 using System.Security.Cryptography;
+using Caseomatic.Net.Utility;
 
 namespace Caseomatic.Net
 {
@@ -44,11 +45,11 @@ namespace Caseomatic.Net
         }
 
         /// <summary>
-        /// 
+        /// Deserializes a byte array into a packet instance.
         /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="bytes"></param>
-        /// <returns></returns>
+        /// <typeparam name="T">The expected type of the packet instance.</typeparam>
+        /// <param name="bytes">The array of bytes containing the data needed to deserialize.</param>
+        /// <returns>The deserialized packet instance.</returns>
         public static T ToPacket<T>(byte[] bytes) where T : IPacket
         {
             lock (serializerLock)
@@ -65,7 +66,7 @@ namespace Caseomatic.Net
         // What it does?
         // Initially the packet argument is serialized into a byte array.
         // Then a new buffer is created, one byte bigger, the serialized byte array is copied into the new buffer with the first index slot free.
-        // This first slot is used to store a vector byte, containing information about the encryption and compression of the packet sent.
+        // This first slot is used to store a so-called meta byte, containing information about the encryption and compression of the packet sent.
         // Flags:
         //  1. Huffman-compress
         //  2. Encrypt
@@ -87,28 +88,27 @@ namespace Caseomatic.Net
 
             // After encrypting and or compressing, the flex byte is inserted in front of the first index
             var flexBytes = new byte[bytes.Length + 1];
-            flexBytes[0] = new VectorByte( // The info byte
+            flexBytes[0] = new VectorByte( // The meta byte
                 encrypt,   // 1: Huffman-compress
                 compress);     // 2: Encrypt
 
             Buffer.BlockCopy(bytes, 0, flexBytes, 1, bytes.Length);
-
             return flexBytes;
         }
         public static T ToFlexPacket<T>(byte[] flexBytes) where T : IPacket
         {
-            // Before decrypting and or decompressing we need to know which of these techniques have been applied, by reading the first byte array index
-            var infoByte = new VectorByte(flexBytes[0]);
+            // Before decrypting and/or decompressing we need to know which of these techniques have been applied, by reading the first byte array index
+            var metaByte = new VectorByte(flexBytes[0]);
 
             var bytes = new byte[flexBytes.Length - 1];
             Buffer.BlockCopy(flexBytes, 1, bytes, 0, bytes.Length);
 
             // Reversed: decompress first, then decrypt
-            if (infoByte[0])
+            if (metaByte[0])
             {
                 bytes = ToDecompressedBytes(bytes);
             }
-            if (infoByte[1])
+            if (metaByte[1])
             {
                 bytes = ToDecryptedBytes(bytes);
             }
@@ -128,17 +128,16 @@ namespace Caseomatic.Net
             var decompressedBytes = new byte[compressedBytes.Length];
             HuffmanCompressor.Decompress(compressedBytes, out decompressedBytes);
 
-            return compressedBytes;
+            return decompressedBytes;
         }
-
-        // TODO: Implement crypto
+        
         private static byte[] ToEncryptedBytes(byte[] encryptedBytes)
         {
-            return encryptedBytes;
+            return Crypto.Encrypt(encryptedBytes, false);
         }
         private static byte[] ToDecryptedBytes(byte[] decryptedBytes)
         {
-            return decryptedBytes;
+            return Crypto.Decrypt(decryptedBytes, false);
         }
     }
 }

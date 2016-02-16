@@ -191,8 +191,9 @@ namespace Caseomatic.Net
             }
             catch (SocketException ex)
             {
-                Console.WriteLine("Connecting to " + serverEndPoint.ToString() + " resulted in a problem: " + ex.SocketErrorCode +
-                    "\n" + ex.Message);
+                Console.WriteLine("Connecting to " + serverEndPoint.ToString() +
+                    " resulted in a problem: " + ex.SocketErrorCode + "\n" + ex.Message);
+
                 Disconnect();
             }
         }
@@ -204,7 +205,11 @@ namespace Caseomatic.Net
                 isConnected = false;
                 receivePacketsThread.Join();
 
-                socket.Close(); // Or use socket.Disconnect(true) instead of close/null?
+                lock (socketLock)
+                {
+                    socket.Close(); // Or use socket.Disconnect(true) instead of close/null?
+                }
+
                 Console.WriteLine("Disconnected from the server");
             }
             catch (SocketException ex)
