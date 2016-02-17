@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Caseomatic.Net", "Caseomati
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Caseomatic.Db", "Caseomatic.Db\Caseomatic.Db.csproj", "{43A28DED-1732-41A2-A501-2D6C23B4B875}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Caseomatic.Net.Matchmaking", "Caseomatic.Net.Matchmaking\Caseomatic.Net.Matchmaking.csproj", "{8C559515-F3B2-4936-A1D8-687F3713DCAD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{43A28DED-1732-41A2-A501-2D6C23B4B875}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{43A28DED-1732-41A2-A501-2D6C23B4B875}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{43A28DED-1732-41A2-A501-2D6C23B4B875}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8C559515-F3B2-4936-A1D8-687F3713DCAD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8C559515-F3B2-4936-A1D8-687F3713DCAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8C559515-F3B2-4936-A1D8-687F3713DCAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8C559515-F3B2-4936-A1D8-687F3713DCAD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
