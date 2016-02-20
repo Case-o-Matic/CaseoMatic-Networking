@@ -145,6 +145,7 @@ namespace Caseomatic.Net
         /// <returns>Returns if the heartbeat has been successful, if repairing is activated, returns if the repair has been successful.</returns>
         public bool HeartbeatConnection(bool repairIfBroken)
         {
+            return true;
             if (isConnected)
             {
                 bool isReallyConnected;

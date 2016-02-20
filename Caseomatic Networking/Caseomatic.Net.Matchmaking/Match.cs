@@ -21,7 +21,7 @@ namespace Caseomatic.Net.Matchmaking
 
         public float EvaulateAppliedSearchSettings()
         {
-
+            throw new NotImplementedException();
         }
     }
 

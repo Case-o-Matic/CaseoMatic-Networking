@@ -8,11 +8,11 @@ namespace Caseomatic.Net.Matchmaking
 {
     public class MatchmakingServer
     {
-        private readonly GameServer<IServerMMPacket, IClientMMPacket> server;
+        private readonly Server<IServerMMPacket, IClientMMPacket> server;
 
-        public MatchmakingServer()
+        public MatchmakingServer(int port)
         {
-
+            server = new Server<IServerMMPacket, IClientMMPacket>(port);
         }
     }
 }
