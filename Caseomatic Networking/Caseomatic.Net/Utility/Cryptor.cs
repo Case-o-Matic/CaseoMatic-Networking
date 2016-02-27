@@ -8,7 +8,7 @@ using System.Text;
 
 namespace Caseomatic.Net.Utility
 {
-    public static class Crypto
+    public static class Cryptor
     {
         public static RSAParameters? rsaParams;
 

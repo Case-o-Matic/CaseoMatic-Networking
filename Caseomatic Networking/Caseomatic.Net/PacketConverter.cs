@@ -133,11 +133,11 @@ namespace Caseomatic.Net
         
         private static byte[] ToEncryptedBytes(byte[] encryptedBytes)
         {
-            return Crypto.Encrypt(encryptedBytes, false);
+            return Cryptor.Encrypt(encryptedBytes, false);
         }
         private static byte[] ToDecryptedBytes(byte[] decryptedBytes)
         {
-            return Crypto.Decrypt(decryptedBytes, false);
+            return Cryptor.Decrypt(decryptedBytes, false);
         }
     }
 }

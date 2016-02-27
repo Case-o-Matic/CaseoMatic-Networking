@@ -52,7 +52,7 @@
     <Compile Include="Sockets\Server.cs" />
     <Compile Include="Utility\ConcurrentDictionary.cs" />
     <Compile Include="Utility\ConcurrentStack.cs" />
-    <Compile Include="Utility\Crypto.cs" />
+    <Compile Include="Utility\Cryptor.cs" />
     <Compile Include="Utility\HuffmanCompressor.cs" />
     <Compile Include="Utility\LineGraph.cs" />
     <Compile Include="Utility\SocketUtility.cs" />
