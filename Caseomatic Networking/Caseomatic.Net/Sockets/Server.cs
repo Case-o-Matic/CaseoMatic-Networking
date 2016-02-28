@@ -43,11 +43,11 @@ namespace Caseomatic.Net
             get { return (IPEndPoint)server.LocalEndpoint; }
         }
 
-        private ICommunicationModule communicationModule;
+        private ICommunicationModule<TClientPacket, TServerPacket> communicationModule;
         /// <summary>
         /// The communication module that controls the conversion from bytes to packets and vice versa.
         /// </summary>
-        public ICommunicationModule CommunicationModule
+        public ICommunicationModule<TClientPacket, TServerPacket> CommunicationModule
         {
             get
             {
@@ -65,7 +65,7 @@ namespace Caseomatic.Net
             clientConnections = new ConcurrentDictionary<int, ClientConnection>();
             lostConnectionsBuffer = new ConcurrentStack<int>();
 
-            communicationModule = new DefaultCommunicationModule();
+            communicationModule = new DefaultCommunicationModule<TClientPacket, TServerPacket>();
             receivePacketsBuffer = new ConcurrentStack<ClientPacketPair>();
         }
         ~Server()
@@ -319,7 +319,7 @@ namespace Caseomatic.Net
                 }
                 else
                 {
-                    return CommunicationModule.ConvertReceive<TClientPacket>(clientConnection.packetReceivingBuffer);
+                    return CommunicationModule.ConvertReceive(clientConnection.packetReceivingBuffer);
                 }
             }
             catch (SocketException ex) when(ex.SocketErrorCode != SocketError.TimedOut)

@@ -93,7 +93,7 @@ namespace Caseomatic.Net
                     if (buffer != null && senderEndPoint == multicastEndPoint
                         && senderConnectionId != 0)
                     {
-                        receivePacketsBuffer.Push(new ClientPacketPair(senderConnectionId, CommunicationModule.ConvertReceive<TClientPacket>(buffer)));
+                        receivePacketsBuffer.Push(new ClientPacketPair(senderConnectionId, CommunicationModule.ConvertReceive(buffer)));
                     }
                     else
                         Console.WriteLine("The multicast packet sender of endpoint " + senderEndPoint.ToString() + " is unknown, dropping packet...");

@@ -34,13 +34,11 @@ namespace Caseomatic.Net
         /// <returns>The serialized bytes.</returns>
         public static byte[] ToBytes<T>(T packet) where T : IPacket
         {
-            lock (serializerLock)
+            using (var mStream = new MemoryStream())
             {
-                using (var mStream = new MemoryStream())
-                {
+                lock (serializerLock)
                     serializer.Serialize(mStream, packet);
-                    return mStream.ToArray();
-                }
+                return mStream.ToArray();
             }
         }
 
@@ -52,13 +50,13 @@ namespace Caseomatic.Net
         /// <returns>The deserialized packet instance.</returns>
         public static T ToPacket<T>(byte[] bytes) where T : IPacket
         {
-            lock (serializerLock)
+            using (var mStream = new MemoryStream(bytes))
             {
-                using (var mStream = new MemoryStream(bytes))
-                {
-                    var deserializedObj = serializer.Deserialize(mStream);
-                    return deserializedObj != null ? (T)deserializedObj : default(T);
-                }
+                T deserializedObj;
+                lock (serializerLock)
+                    deserializedObj = (T)serializer.Deserialize(mStream);
+                
+                return deserializedObj;
             }
         }
 

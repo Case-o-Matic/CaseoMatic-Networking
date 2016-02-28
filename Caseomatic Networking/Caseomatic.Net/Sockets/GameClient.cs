@@ -87,7 +87,7 @@ namespace Caseomatic.Net
                         senderEndPoint == multicastEndPoint)
                     {
                         receivePacketsUdpSynchronizationStack.Push(
-                            CommunicationModule.ConvertReceive<TServerPacket>(udpClientReceiveBuffer));
+                            CommunicationModule.ConvertReceive(udpClientReceiveBuffer));
                     }
                 }
             }

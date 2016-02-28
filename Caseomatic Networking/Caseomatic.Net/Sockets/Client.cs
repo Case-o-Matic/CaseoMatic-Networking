@@ -35,11 +35,11 @@ namespace Caseomatic.Net
 
         private readonly ConcurrentStack<TServerPacket> receivePacketsSynchronizationStack;
 
-        private ICommunicationModule communicationModule;
+        private ICommunicationModule<TServerPacket, TClientPacket> communicationModule;
         /// <summary>
         /// The communication module that controls the conversion from bytes to packets and vice versa.
         /// </summary>
-        public ICommunicationModule CommunicationModule
+        public ICommunicationModule<TServerPacket, TClientPacket> CommunicationModule
         {
             get
             {
@@ -71,7 +71,7 @@ namespace Caseomatic.Net
             socketLock = new object();
 
             receivePacketsSynchronizationStack = new ConcurrentStack<TServerPacket>();
-            communicationModule = new DefaultCommunicationModule();
+            communicationModule = new DefaultCommunicationModule<TServerPacket, TClientPacket>();
         }
         ~Client()
         {
@@ -366,7 +366,7 @@ namespace Caseomatic.Net
                     var receivedBytes = socket.Receive(packetReceivingBuffer);
                     if (receivedBytes != 0)
                     {
-                        return CommunicationModule.ConvertReceive<TServerPacket>(packetReceivingBuffer);
+                        return CommunicationModule.ConvertReceive(packetReceivingBuffer);
                     }
                 }
 

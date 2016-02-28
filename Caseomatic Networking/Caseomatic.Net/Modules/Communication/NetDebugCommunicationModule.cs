@@ -8,10 +8,11 @@ using System.Threading;
 
 namespace Caseomatic.Net
 {
-    public class NetDebugCommunicationModule : ICommunicationModule
+    public class NetDebugCommunicationModule<TReceivePacket, TSendPacket>
+        : ICommunicationModule<TReceivePacket, TSendPacket> where TReceivePacket : IPacket where TSendPacket : IPacket
     {
         private static Random random = new Random(DateTime.Now.Millisecond);
-        private readonly ICommunicationModule underlyingCommModule;
+        private readonly ICommunicationModule<TReceivePacket, TSendPacket> underlyingCommModule;
 
         private NetDebugProperties properties;
         public NetDebugProperties Properties
@@ -47,7 +48,7 @@ namespace Caseomatic.Net
             get { return receivedPacketsSizeGraph; }
         }
 
-        public NetDebugCommunicationModule(ICommunicationModule underlyingCommModule)
+        public NetDebugCommunicationModule(ICommunicationModule<TReceivePacket, TSendPacket> underlyingCommModule)
         {
             this.underlyingCommModule = underlyingCommModule;
             properties = new NetDebugProperties();
@@ -58,27 +59,27 @@ namespace Caseomatic.Net
             receivedPacketsSizeGraph = new LineGraph(false);
         }
 
-        public T ConvertReceive<T>(byte[] bytes) where T : IPacket
+        public TReceivePacket ConvertReceive(byte[] bytes)
         {
             var stopwatch = Stopwatch.StartNew();
             bytes = ApplyReceiveProperties(bytes);
             stopwatch.Stop();
 
             if (bytes == null)
-                return default(T);
+                return default(TReceivePacket);
             deserializationGraph.Add(stopwatch.ElapsedMilliseconds);
 
             receivedBytes += bytes.Length;
             receivedPacketsSizeGraph.Add(bytes.Length);
 
-            var packet = underlyingCommModule.ConvertReceive<T>(bytes);
+            var packet = underlyingCommModule.ConvertReceive(bytes);
             Log("Received packet of type " + packet.GetType().FullName +
                 "\nByte size: " + bytes.Length + ", Deserialization time: " + stopwatch.ElapsedMilliseconds);
 
             return packet;
         }
 
-        public byte[] ConvertSend<T>(T packet) where T : IPacket
+        public byte[] ConvertSend(TSendPacket packet)
         {
             packet = ApplySendProperties(packet);
 
