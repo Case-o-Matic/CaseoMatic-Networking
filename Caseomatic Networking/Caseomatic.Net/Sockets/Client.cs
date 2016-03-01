@@ -26,12 +26,10 @@ namespace Caseomatic.Net
         public event OnConnectionLostHandler OnConnectionLost;
 
         private Socket socket;
-        private Thread receivePacketsThread;
-
         private byte[] packetReceivingBuffer;
-        private object socketLock;
         private readonly int port;
         private bool isConnectionLost;
+        private object commModuleLock;
 
         private readonly ConcurrentStack<TServerPacket> receivePacketsSynchronizationStack;
 
@@ -68,10 +66,11 @@ namespace Caseomatic.Net
         public Client(int port)
         {
             this.port = port;
-            socketLock = new object();
 
             receivePacketsSynchronizationStack = new ConcurrentStack<TServerPacket>();
             communicationModule = new DefaultCommunicationModule<TServerPacket, TClientPacket>();
+
+            commModuleLock = new object();
         }
         ~Client()
         {
@@ -138,6 +137,45 @@ namespace Caseomatic.Net
                 OnConnectionLost();
         }
 
+        protected virtual void OnConnect(IPEndPoint serverEndPoint)
+        {
+            try
+            {
+                socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                socket.Bind(new IPEndPoint(IPAddress.Any, port));
+
+                socket.ConfigureInitialSocket();
+                socket.Connect(serverEndPoint);
+
+                packetReceivingBuffer = new byte[socket.ReceiveBufferSize];
+
+                isConnected = true;
+                StartReceivePacketLoop();
+            }
+            catch (SocketException ex)
+            {
+                Console.WriteLine("Connecting to " + serverEndPoint.ToString() +
+                    " resulted in a problem: " + ex.SocketErrorCode + "\n" + ex.Message);
+
+                Disconnect();
+            }
+        }
+
+        protected virtual void OnDisconnect()
+        {
+            try
+            {
+                isConnected = false;
+                socket.Close(); // Or use socket.Disconnect(true) instead of close/null?
+
+                Console.WriteLine("Disconnected from the server");
+            }
+            catch (SocketException ex)
+            {
+                Console.WriteLine("Disconnecting resulted in a problem: " + ex.SocketErrorCode);
+            }
+        }
+
         /// <summary>
         /// Heartbeats the connection on sending, receiving and its availability.
         /// </summary>
@@ -148,8 +186,7 @@ namespace Caseomatic.Net
             if (isConnected)
             {
                 bool isReallyConnected;
-                lock (socketLock)
-                    isReallyConnected = socket.IsConnectionValid();
+                isReallyConnected = socket.IsConnectionValid();
 
                 if (!isReallyConnected)
                 {
@@ -169,52 +206,6 @@ namespace Caseomatic.Net
                 return false;
         }
 
-        protected virtual void OnConnect(IPEndPoint serverEndPoint)
-        {
-            try
-            {
-                lock (socketLock)
-                {
-                    socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                    socket.Bind(new IPEndPoint(IPAddress.Any, port));
-
-                    socket.ConfigureInitialSocket();
-
-                    socket.Connect(serverEndPoint);
-                    packetReceivingBuffer = new byte[socket.ReceiveBufferSize];
-                }
-
-                isConnected = true;
-
-                receivePacketsThread = new Thread(ReceivePacketsLoop);
-                receivePacketsThread.Start();
-            }
-            catch (SocketException ex)
-            {
-                Console.WriteLine("Connecting to " + serverEndPoint.ToString() +
-                    " resulted in a problem: " + ex.SocketErrorCode + "\n" + ex.Message);
-
-                Disconnect();
-            }
-        }
-
-        protected virtual void OnDisconnect()
-        {
-            try
-            {
-                isConnected = false;
-                //receivePacketsThread.Join();
-                lock (socketLock)
-                    socket.Close(); // Or use socket.Disconnect(true) instead of close/null?
-
-                Console.WriteLine("Disconnected from the server");
-            }
-            catch (SocketException ex)
-            {
-                Console.WriteLine("Disconnecting resulted in a problem: " + ex.SocketErrorCode);
-            }
-        }
-
         /// <summary>
         /// Sends a packet to the server.
         /// </summary>
@@ -225,157 +216,97 @@ namespace Caseomatic.Net
             {
                 if (isConnected)
                 {
-                    byte[] packetBytes;
-                    int sentBytes;
+                    byte[] bytes;
+                    lock (commModuleLock)
+                        bytes = communicationModule.ConvertSend(packet);
 
-                    lock (socketLock)
+                    socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, (result) =>
                     {
-                        packetBytes = CommunicationModule.ConvertSend(packet);
-                        sentBytes = socket.Send(packetBytes);
-                    }
+                        SocketError error;
+                        var sentBytes = socket.EndSend(result, out error);
 
-                    if (sentBytes == 0)
-                    {
-                        Console.WriteLine("Sending to server resulted in a problem: Peer not reached");
-                        HeartbeatConnection(false);
-                    }
+                        if (sentBytes == 0)
+                        {
+                            Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning.");
+                            HeartbeatConnection(false);
+                        }
+                    }, null);
                 }
             }
-            catch (SocketException ex)
+            catch (SocketException ex) // TODO: Improve exception-catching
             {
                 Console.WriteLine("Sending to the server resulted in a problem: " + ex.SocketErrorCode +
                     "\n" + ex.Message);
                 HeartbeatConnection(true);
             }
         }
-
-        #region Requests
-        /// <summary>
-        /// Sends a packet to the server and synchronously awaits the next answer.
-        /// </summary>
-        /// <typeparam name="TClientRequest">The type of the packet that is sent.</typeparam>
-        /// <typeparam name="TServerAnswer">The type of the packet that shall be received.</typeparam>
-        /// <param name="requestPacket">The request packet that is sent.</param>
-        /// <returns>The answer packet from the server.</returns>
-        public TServerAnswer SendRequest<TClientRequest, TServerAnswer>(TClientRequest requestPacket)
-            where TClientRequest : TClientPacket, IPacketRequestable where TServerAnswer : TServerPacket
+        
+        private void StartReceivePacketLoop()
         {
-            if (isConnected)
+            if (!isConnected)
             {
-                SendPacket(requestPacket);
-                var answerPacket = ReceivePacket();
-
-                return answerPacket != null ?
-                    (TServerAnswer)answerPacket : default(TServerAnswer);
+                Console.WriteLine("Tried receiving asynchronously without being connected.");
             }
             else
-                return default(TServerAnswer);
-        }
-
-        /// <summary>
-        /// Sends a request and indicates if a proper answer has been received.
-        /// </summary>
-        /// <typeparam name="TClientRequest">The type of the packet that is sent.</typeparam>
-        /// <typeparam name="TServerAnswer">The type of the packet that shall be received.</typeparam>
-        /// <param name="requestPacket">The request packet that is sent.</param>
-        /// <param name="answerPacket">The answer packet that shall be received.</param>
-        /// <returns>States if a proper answer has been received.</returns>
-        public bool TrySendRequest<TClientRequest, TServerAnswer>(TClientRequest requestPacket, out TServerAnswer answerPacket)
-            where TClientRequest : TClientPacket, IPacketRequestable where TServerAnswer : TServerPacket
-        {
-            answerPacket = SendRequest<TClientRequest, TServerAnswer>(requestPacket);
-            return !answerPacket.Equals(default(TServerAnswer));
-        }
-
-        /// <summary>
-        /// Sends a request to the server and asynchronously awaits a proper answer from the server.
-        /// </summary>
-        /// <typeparam name="TClientRequest">The type of the packet that is sent.</typeparam>
-        /// <typeparam name="TServerAnswer">The type of the packet that shall be sent.</typeparam>
-        /// <param name="requestPacket">The request packet that is sent.</param>
-        /// <returns>The answer packet from the server.</returns>
-        public TServerAnswer SendRequestAsync<TClientRequest, TServerAnswer>(TClientRequest requestPacket)
-            where TClientRequest : TClientPacket, IPacketRequestable where TServerAnswer : TServerPacket
-        {
-            if (isConnected)
             {
-                TServerAnswer serverAnswerPacket = default(TServerAnswer);
-                object lockObj = new object();
-
-                var rcvThread = new Thread(() =>
+                try
                 {
-                    lock (lockObj) // Could this be a deadlock?
-                        serverAnswerPacket = SendRequest<TClientRequest, TServerAnswer>(requestPacket);
-                });
-                rcvThread.Start();
+                    socket.BeginReceive(packetReceivingBuffer, 0, packetReceivingBuffer.Length, SocketFlags.None,
+                        (result) =>
+                        {
+                            SocketError error;
+                            var receivedBytes = socket.EndReceive(result, out error);
 
-                lock (lockObj)
-                    return serverAnswerPacket;
-            }
-            else
-                return default(TServerAnswer);
-        }
+                            if (error != SocketError.Success && error != SocketError.Interrupted && error != SocketError.TimedOut)
+                            {
+                                Console.WriteLine("The \"" + error + "\" error occured while receiving asynchronously.");
+                                HeartbeatConnection(false);
+                            }
 
-        /// <summary>
-        /// Combines the TrySendRequest and SendRequestAsync methods.
-        /// </summary>
-        public bool TrySendRequestAsync<TClientRequest, TServerAnswer>(TClientRequest requestPacket, out TServerAnswer answerPacket) where TClientRequest : TClientPacket, IPacketRequestable
-            where TServerAnswer : TServerPacket
-        {
-            answerPacket = SendRequestAsync<TClientRequest, TServerAnswer>(requestPacket);
-            return answerPacket.Equals(default(TServerAnswer));
-        }
-        #endregion
+                            if (receivedBytes != 0)
+                            {
+                                lock (commModuleLock)
+                                {
+                                    var packet = communicationModule.ConvertReceive(packetReceivingBuffer);
+                                    receivePacketsSynchronizationStack.Push(packet);
+                                }
 
-        private void ReceivePacketsLoop()
-        {
-            try
-            {
-                while (isConnected)
+                                StartReceivePacketLoop();
+                            }
+                            else
+                            {
+                                Console.WriteLine("Received 0 bytes from server: Connection dropped.");
+                                Disconnect();
+                            }
+                        }, null);
+                }
+                catch (Exception ex) // TODO: Improve exception-catching
                 {
-                    var serverPacket = ReceivePacket();
-                    if (serverPacket != null)
-                        receivePacketsSynchronizationStack.Push(serverPacket);
+                    Console.WriteLine("Receiving asynchronously produced an exception: " + ex.Message);
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Receiving in the client loop resulted in an exception: " + ex.Message);
-                HeartbeatConnection(true);
-            }
         }
 
-        /// <summary>
-        /// Synchronously receives a packet from the server.
-        /// </summary>
-        /// <returns>The received packet from the server, or the default type value if the method malfunctioned.</returns>
-        private TServerPacket ReceivePacket()
+        private void StartSendPacket(TClientPacket packet)
         {
-            try
-            {
-                lock (socketLock)
+            var bytes = communicationModule.ConvertSend(packet);
+            socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, (result) =>
                 {
-                    var receivedBytes = socket.Receive(packetReceivingBuffer);
-                    if (receivedBytes != 0)
+                    SocketError error;
+                    var sentBytes = socket.EndSend(result, out error);
+
+                    if (error != SocketError.Success && error != SocketError.Interrupted && error != SocketError.TimedOut)
                     {
-                        return CommunicationModule.ConvertReceive(packetReceivingBuffer);
+                        Console.WriteLine("The \"" + error + "\" error occured while receiving asynchronously.");
+                        HeartbeatConnection(false);
                     }
-                }
 
-                Console.WriteLine("Receiving from server resulted in a problem: 0 bytes received");
-                Disconnect();
-
-                return default(TServerPacket);
-            }
-            catch (SocketException ex) when(
-                ex.SocketErrorCode != SocketError.TimedOut || ex.SocketErrorCode != SocketError.Interrupted)
-            {
-                Console.WriteLine("Receiving from server resulted in a problem: " + ex.SocketErrorCode +
-                    "\n" + ex.Message);
-                HeartbeatConnection(true);
-
-                return default(TServerPacket);
-            }
+                    if (sentBytes == 0)
+                    {
+                        Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning.");
+                        HeartbeatConnection(false);
+                    }
+                }, null);
         }
 
         /// <summary>
@@ -384,10 +315,7 @@ namespace Caseomatic.Net
         /// <returns></returns>
         private bool RepairConnection()
         {
-            // The endpoint the client is currently connected to
-            IPEndPoint remoteEndPoint;
-            lock (socketLock)
-                remoteEndPoint = (IPEndPoint)socket.RemoteEndPoint;
+            var remoteEndPoint = (IPEndPoint)socket.RemoteEndPoint;
             Disconnect();
 
             var ping = new Ping();
@@ -395,14 +323,14 @@ namespace Caseomatic.Net
 
             if (pReply.Status == IPStatus.Success)
             {
-                Console.WriteLine("Reconnecting to server");
+                Console.WriteLine("Reconnecting to the server.");
 
                 Connect(remoteEndPoint);
                 return HeartbeatConnection(false);
             }
             else
             {
-                Console.WriteLine("IP not pingable. Result: " + pReply.Status + ", dropping off");
+                Console.WriteLine("IP not pingable. Result: " + pReply.Status + ", dropping off.");
                 return false;
             }
         }
