@@ -145,7 +145,6 @@ namespace Caseomatic.Net
         /// <returns>Returns if the heartbeat has been successful, if repairing is activated, returns if the repair has been successful.</returns>
         public bool HeartbeatConnection(bool repairIfBroken)
         {
-            return true;
             if (isConnected)
             {
                 bool isReallyConnected;
@@ -204,12 +203,9 @@ namespace Caseomatic.Net
             try
             {
                 isConnected = false;
-                receivePacketsThread.Join();
-
+                //receivePacketsThread.Join();
                 lock (socketLock)
-                {
                     socket.Close(); // Or use socket.Disconnect(true) instead of close/null?
-                }
 
                 Console.WriteLine("Disconnected from the server");
             }
@@ -308,7 +304,7 @@ namespace Caseomatic.Net
 
                 var rcvThread = new Thread(() =>
                 {
-                    lock (lockObj)
+                    lock (lockObj) // Could this be a deadlock?
                         serverAnswerPacket = SendRequest<TClientRequest, TServerAnswer>(requestPacket);
                 });
                 rcvThread.Start();
@@ -339,11 +335,7 @@ namespace Caseomatic.Net
                 {
                     var serverPacket = ReceivePacket();
                     if (serverPacket != null)
-                    {
                         receivePacketsSynchronizationStack.Push(serverPacket);
-                    }
-                    // Else: Information about corruption already printed in ReceivePacket()
-                    //    Console.WriteLine("The received packet is corrupt.");
                 }
             }
             catch (Exception ex)
@@ -375,7 +367,8 @@ namespace Caseomatic.Net
 
                 return default(TServerPacket);
             }
-            catch (SocketException ex) when(ex.SocketErrorCode != SocketError.TimedOut)
+            catch (SocketException ex) when(
+                ex.SocketErrorCode != SocketError.TimedOut || ex.SocketErrorCode != SocketError.Interrupted)
             {
                 Console.WriteLine("Receiving from server resulted in a problem: " + ex.SocketErrorCode +
                     "\n" + ex.Message);
@@ -394,9 +387,7 @@ namespace Caseomatic.Net
             // The endpoint the client is currently connected to
             IPEndPoint remoteEndPoint;
             lock (socketLock)
-            {
                 remoteEndPoint = (IPEndPoint)socket.RemoteEndPoint;
-            }
             Disconnect();
 
             var ping = new Ping();
