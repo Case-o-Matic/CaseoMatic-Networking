@@ -195,7 +195,7 @@ namespace Caseomatic.Net
         /// <param name="packet">The packet to be sent.</param>
         public void SendPacket(TServerPacket packet)
         {
-            ImmutableArray currentClientConnections = new int[clientConnections.Count];
+            var currentClientConnections = new int[clientConnections.Count];
             clientConnections.AllKeys.CopyTo(currentClientConnections, 0);
 
             SendPacket(packet, currentClientConnections);
