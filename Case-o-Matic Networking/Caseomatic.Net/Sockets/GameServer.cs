@@ -99,7 +99,8 @@ namespace Caseomatic.Net
                         Console.WriteLine("The multicast packet sender of endpoint " + senderEndPoint.ToString() + " is unknown, dropping packet...");
                 }
             }
-            catch (SocketException ex) when(ex.SocketErrorCode != SocketError.TimedOut)
+            catch (SocketException ex)
+                when(ex.SocketErrorCode != SocketError.TimedOut && ex.SocketErrorCode != SocketError.Interrupted)
             {
                 Console.WriteLine("Receiving on the UDP client has brought an error: " + ex.Message);
             }

@@ -21,7 +21,7 @@ namespace Caseomatic.Net
 
         public delegate void OnConnectionLostHandler();
         /// <summary>
-        /// Called when the connection to the server is lost, noticed by an exception or heartbeat.
+        /// Called when the connection to the server is lost, noticed by a heartbeat. 
         /// </summary>
         public event OnConnectionLostHandler OnConnectionLost;
 
@@ -58,9 +58,21 @@ namespace Caseomatic.Net
             get { return isConnected; }
         }
 
+        /// <summary>
+        /// Endpoint of the server this client is connected to.
+        /// </summary>
         public IPEndPoint ServerEndPoint
         {
             get { return (IPEndPoint)socket.RemoteEndPoint; }
+        }
+
+        private bool activeConnectionRepair = true;
+        /// <summary>
+        /// Repairs the socket connection automatically if the connection malfunctions but server shows a heartbeat. True by default.
+        /// </summary>
+        public bool ActiveConnectionRepair
+        {
+            get { return activeConnectionRepair; }
         }
 
         public Client(int port)
@@ -185,6 +197,8 @@ namespace Caseomatic.Net
         {
             if (isConnected)
             {
+                Console.WriteLine("Heartbeating server...");
+
                 bool isReallyConnected;
                 isReallyConnected = socket.IsConnectionValid();
 
@@ -225,10 +239,19 @@ namespace Caseomatic.Net
                         SocketError error;
                         var sentBytes = socket.EndSend(result, out error);
 
-                        if (sentBytes == 0)
+                        if (error != SocketError.Success)
                         {
-                            Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning.");
-                            HeartbeatConnection(false);
+                            if (sentBytes == 0)
+                            {
+                                Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning." +
+                                    " (" + error  + ")");
+                                HeartbeatConnection(false);
+                            }
+                            else
+                            {
+                                Console.WriteLine("An error occured while sending: " + error);
+                                HeartbeatConnection(true);
+                            }
                         }
                     }, null);
                 }
@@ -259,25 +282,26 @@ namespace Caseomatic.Net
 
                             if (error != SocketError.Success && error != SocketError.Interrupted && error != SocketError.TimedOut)
                             {
-                                Console.WriteLine("The \"" + error + "\" error occured while receiving asynchronously.");
-                                HeartbeatConnection(false);
-                            }
-
-                            if (receivedBytes != 0)
-                            {
-                                lock (commModuleLock)
+                                if (receivedBytes == 0)
                                 {
-                                    var packet = communicationModule.ConvertReceive(packetReceivingBuffer);
-                                    receivePacketsSynchronizationStack.Push(packet);
+                                    Console.WriteLine("Received 0 bytes from server: Connection dropped.");
+                                    Disconnect();
+                                }
+                                else
+                                {
+                                    Console.WriteLine("The \"" + error + "\" error occured while receiving asynchronously.");
+                                    HeartbeatConnection(false); 
                                 }
 
-                                StartReceivePacketLoop();
+                                return;
                             }
-                            else
-                            {
-                                Console.WriteLine("Received 0 bytes from server: Connection dropped.");
-                                Disconnect();
-                            }
+
+                            TServerPacket packet;
+                            lock (commModuleLock)
+                                packet = communicationModule.ConvertReceive(packetReceivingBuffer);
+
+                            receivePacketsSynchronizationStack.Push(packet);
+                            StartReceivePacketLoop();
                         }, null);
                 }
                 catch (Exception ex) // TODO: Improve exception-catching
@@ -289,7 +313,10 @@ namespace Caseomatic.Net
 
         private void StartSendPacket(TClientPacket packet)
         {
-            var bytes = communicationModule.ConvertSend(packet);
+            byte[] bytes;
+            lock (commModuleLock)
+                bytes = communicationModule.ConvertSend(packet);
+
             socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, (result) =>
                 {
                     SocketError error;
@@ -297,14 +324,16 @@ namespace Caseomatic.Net
 
                     if (error != SocketError.Success && error != SocketError.Interrupted && error != SocketError.TimedOut)
                     {
-                        Console.WriteLine("The \"" + error + "\" error occured while receiving asynchronously.");
-                        HeartbeatConnection(false);
-                    }
-
-                    if (sentBytes == 0)
-                    {
-                        Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning.");
-                        HeartbeatConnection(false);
+                        if (sentBytes == 0)
+                        {
+                            Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning (" + error + ").");
+                            HeartbeatConnection(false);
+                        }
+                        else
+                        {
+                            Console.WriteLine("The \"" + error + "\" error occured while receiving asynchronously.");
+                            HeartbeatConnection(false);
+                        }
                     }
                 }, null);
         }
