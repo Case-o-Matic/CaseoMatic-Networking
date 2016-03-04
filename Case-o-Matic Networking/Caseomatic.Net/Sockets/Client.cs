@@ -205,10 +205,9 @@ namespace Caseomatic.Net
                 if (!isReallyConnected)
                 {
                     Console.WriteLine("The server shows no heartbeat" + (repairIfBroken ?
-                        ", trying to repair connection" : ", disconnecting"));
+                        ", trying to repair connection." : ", disconnecting."));
 
-                    Disconnect();
-                    isConnectionLost = true;
+                    DisconnectLost();
 
                     if (repairIfBroken)
                         RepairConnection();
@@ -264,6 +263,12 @@ namespace Caseomatic.Net
             }
         }
         
+        protected void DisconnectLost()
+        {
+            isConnectionLost = true;
+            Disconnect();
+        }
+
         private void StartReceivePacketLoop()
         {
             if (!isConnected)
@@ -277,65 +282,62 @@ namespace Caseomatic.Net
                     socket.BeginReceive(packetReceivingBuffer, 0, packetReceivingBuffer.Length, SocketFlags.None,
                         (result) =>
                         {
-                            SocketError error;
-                            var receivedBytes = socket.EndReceive(result, out error);
+                            var receivedBytes = socket.EndReceive(result);
 
-                            if (error != SocketError.Success && error != SocketError.Interrupted && error != SocketError.TimedOut)
+                            if (receivedBytes == 0)
                             {
-                                if (receivedBytes == 0)
-                                {
-                                    Console.WriteLine("Received 0 bytes from server: Connection dropped.");
-                                    Disconnect();
-                                }
-                                else
-                                {
-                                    Console.WriteLine("The \"" + error + "\" error occured while receiving asynchronously.");
-                                    HeartbeatConnection(false); 
-                                }
-
-                                return;
+                                Console.WriteLine("Received 0 bytes from server: Connection dropped.");
+                                DisconnectLost();
                             }
+                            else
+                            {
+                                TServerPacket packet;
+                                lock (commModuleLock)
+                                    packet = communicationModule.ConvertReceive(packetReceivingBuffer);
 
-                            TServerPacket packet;
-                            lock (commModuleLock)
-                                packet = communicationModule.ConvertReceive(packetReceivingBuffer);
-
-                            receivePacketsSynchronizationStack.Push(packet);
-                            StartReceivePacketLoop();
+                                receivePacketsSynchronizationStack.Push(packet);
+                                StartReceivePacketLoop();
+                            }
                         }, null);
                 }
-                catch (Exception ex) // TODO: Improve exception-catching
+                catch (SocketException ex)
+                    when(ex.SocketErrorCode != SocketError.Interrupted && ex.SocketErrorCode != SocketError.TimedOut) // TODO: Improve exception-catching
                 {
                     Console.WriteLine("Receiving asynchronously produced an exception: " + ex.Message);
+                    HeartbeatConnection(true);
+                }
+                finally
+                {
+                    StartReceivePacketLoop();
                 }
             }
         }
 
         private void StartSendPacket(TClientPacket packet)
         {
-            byte[] bytes;
-            lock (commModuleLock)
-                bytes = communicationModule.ConvertSend(packet);
+            try
+            {
+                byte[] bytes;
+                lock (commModuleLock)
+                    bytes = communicationModule.ConvertSend(packet);
 
-            socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, (result) =>
-                {
-                    SocketError error;
-                    var sentBytes = socket.EndSend(result, out error);
-
-                    if (error != SocketError.Success && error != SocketError.Interrupted && error != SocketError.TimedOut)
+                socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, (result) =>
                     {
+                        var sentBytes = socket.EndSend(result);
+
                         if (sentBytes == 0)
                         {
-                            Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning (" + error + ").");
+                            Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning.");
                             HeartbeatConnection(false);
                         }
-                        else
-                        {
-                            Console.WriteLine("The \"" + error + "\" error occured while receiving asynchronously.");
-                            HeartbeatConnection(false);
-                        }
-                    }
-                }, null);
+                    }, null);
+            }
+            catch (SocketException ex)
+                when(ex.SocketErrorCode != SocketError.Interrupted)
+            {
+                Console.WriteLine("Sending produced an exception: " + ex.Message);
+                HeartbeatConnection(true);
+            }
         }
 
         /// <summary>
