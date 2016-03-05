@@ -25,11 +25,18 @@ namespace Caseomatic.Net
         /// </summary>
         public event OnConnectionLostHandler OnConnectionLost;
 
+        public delegate void OnConnectionRepairedHandler(double transitionalTimeSeconds);
+        /// <summary>
+        /// Called when the connection is dis- and reconnected to repair it.
+        /// </summary>
+        public event OnConnectionRepairedHandler OnConnectionRepaired;
+
         private Socket socket;
         private byte[] packetReceivingBuffer;
         private readonly int port;
         private bool isConnectionLost;
         private object commModuleLock;
+        private Ping repairPing;
 
         private readonly ConcurrentStack<TServerPacket> receivePacketsSynchronizationStack;
 
@@ -81,9 +88,12 @@ namespace Caseomatic.Net
 
             receivePacketsSynchronizationStack = new ConcurrentStack<TServerPacket>();
             communicationModule = new DefaultCommunicationModule<TServerPacket, TClientPacket>();
-
             commModuleLock = new object();
+
+            repairPing = new Ping();
+            repairPing.PingCompleted += OnRepairPingCompleted;
         }
+
         ~Client()
         {
             Disconnect();
@@ -207,10 +217,10 @@ namespace Caseomatic.Net
                     Console.WriteLine("The server shows no heartbeat" + (repairIfBroken ?
                         ", trying to repair connection." : ", disconnecting."));
 
-                    DisconnectLost();
-
-                    if (repairIfBroken)
+                    if (repairIfBroken && activeConnectionRepair)
                         RepairConnection();
+                    else
+                        DisconnectLost();
                 }
 
                 return isReallyConnected;
@@ -286,7 +296,7 @@ namespace Caseomatic.Net
 
                             if (receivedBytes == 0)
                             {
-                                Console.WriteLine("Received 0 bytes from server: Connection dropped.");
+                                Console.WriteLine("Received 0 bytes from server: Connection dropped. Buffered received-bytes length: " + packetReceivingBuffer.Length);
                                 DisconnectLost();
                             }
                             else
@@ -343,26 +353,26 @@ namespace Caseomatic.Net
         /// <summary>
         /// Repairs the connection by disconnecting, sending a ping and reconnecting under the same circumstances, heartbeating to check if it worked.
         /// </summary>
-        /// <returns></returns>
-        private bool RepairConnection()
+        private void RepairConnection()
         {
-            var remoteEndPoint = (IPEndPoint)socket.RemoteEndPoint;
+            var remoteEndPoint = ServerEndPoint;
             Disconnect();
 
-            var ping = new Ping();
-            var pReply = ping.Send(remoteEndPoint.Address, 250);
-
-            if (pReply.Status == IPStatus.Success)
+            repairPing.SendAsync(remoteEndPoint.Address, 1000, remoteEndPoint);
+        }
+        private void OnRepairPingCompleted(object sender, PingCompletedEventArgs e)
+        {
+            if (e.Reply.Status == IPStatus.Success)
             {
                 Console.WriteLine("Reconnecting to the server.");
 
-                Connect(remoteEndPoint);
-                return HeartbeatConnection(false);
+                Connect(((IPEndPoint)e.UserState));
+                HeartbeatConnection(false);
             }
             else
             {
-                Console.WriteLine("IP not pingable. Result: " + pReply.Status + ", dropping off.");
-                return false;
+                Console.WriteLine("IP not pingable. Result: " + e.Reply.Status + ", dropping off.");
+                isConnectionLost = true;
             }
         }
     }
