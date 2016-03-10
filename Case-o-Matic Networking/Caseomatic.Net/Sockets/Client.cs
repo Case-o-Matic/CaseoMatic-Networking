@@ -25,7 +25,7 @@ namespace Caseomatic.Net
         /// </summary>
         public event OnConnectionLostHandler OnConnectionLost;
 
-        public delegate void OnConnectionRepairedHandler(double transitionalTimeSeconds);
+        public delegate void OnConnectionRepairedHandler();
         /// <summary>
         /// Called when the connection is dis- and reconnected to repair it.
         /// </summary>
@@ -34,7 +34,7 @@ namespace Caseomatic.Net
         private Socket socket;
         private byte[] packetReceivingBuffer;
         private readonly int port;
-        private bool isConnectionLost;
+        private bool isConnectionLost, isConnectionRepaired;
         private object commModuleLock;
         private Ping repairPing;
 
@@ -80,6 +80,7 @@ namespace Caseomatic.Net
         public bool ActiveConnectionRepair
         {
             get { return activeConnectionRepair; }
+            set { activeConnectionRepair = value; }
         }
 
         public Client(int port)
@@ -157,6 +158,8 @@ namespace Caseomatic.Net
 
             if (isConnectionLost && OnConnectionLost != null)
                 OnConnectionLost();
+            if (isConnectionRepaired && OnConnectionRepaired != null)
+                OnConnectionRepaired();
         }
 
         protected virtual void OnConnect(IPEndPoint serverEndPoint)
@@ -205,28 +208,36 @@ namespace Caseomatic.Net
         /// <returns>Returns if the heartbeat has been successful, if repairing is activated, returns if the repair has been successful.</returns>
         public bool HeartbeatConnection(bool repairIfBroken)
         {
-            if (isConnected)
+            try
             {
-                Console.WriteLine("Heartbeating server...");
-
-                bool isReallyConnected;
-                isReallyConnected = socket.IsConnectionValid();
-
-                if (!isReallyConnected)
+                if (isConnected)
                 {
-                    Console.WriteLine("The server shows no heartbeat" + (repairIfBroken ?
-                        ", trying to repair connection." : ", disconnecting."));
+                    Console.WriteLine("Heartbeating server...");
 
-                    if (repairIfBroken && activeConnectionRepair)
-                        RepairConnection();
-                    else
-                        DisconnectLost();
+                    bool isReallyConnected;
+                    isReallyConnected = socket.IsConnectionValid();
+
+                    if (!isReallyConnected)
+                    {
+                        Console.WriteLine("The server shows no heartbeat" + (repairIfBroken ?
+                            ", trying to repair connection." : ", disconnecting."));
+
+                        if (repairIfBroken && activeConnectionRepair)
+                            RepairConnection();
+                        else
+                            DisconnectLost();
+                    }
+
+                    return isReallyConnected;
                 }
-
-                return isReallyConnected;
+                else
+                    return false;
             }
-            else
+            catch (Exception ex)
+            {
+                Console.WriteLine("Heartbeating produced an error: " + ex.ToString());
                 return false;
+            }
         }
 
         /// <summary>
@@ -241,27 +252,35 @@ namespace Caseomatic.Net
                 {
                     byte[] bytes;
                     lock (commModuleLock)
-                        bytes = communicationModule.ConvertSend(packet);
+                    {
+                        var commModule = communicationModule;
+                        bytes = commModule.ConvertSend(packet);
+                    }
+
+                    //var sentBytes = socket.Send(bytes);
+                    //if (sentBytes == 0)
+                    //{
+                    //    Console.WriteLine("An error occured: Sent 0 bytes to server.");
+                    //    HeartbeatConnection(false);
+                    //}
 
                     socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, (result) =>
                     {
-                        SocketError error;
-                        var sentBytes = socket.EndSend(result, out error);
-
-                        if (error != SocketError.Success)
-                        {
-                            if (sentBytes == 0)
-                            {
-                                Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning." +
-                                    " (" + error  + ")");
-                                HeartbeatConnection(false);
-                            }
-                            else
-                            {
-                                Console.WriteLine("An error occured while sending: " + error);
-                                HeartbeatConnection(true);
-                            }
-                        }
+                        var sentBytes = socket.EndSend(result);
+                        //if (error != SocketError.Success)
+                        //{
+                        //    if (sentBytes == 0)
+                        //    {
+                        //        Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning." +
+                        //            " (" + error  + ")");
+                        //        HeartbeatConnection(false);
+                        //    }
+                        //    else
+                        //    {
+                        //        Console.WriteLine("An error occured while sending: " + error);
+                        //        HeartbeatConnection(true);
+                        //    }
+                        //}
                     }, null);
                 }
             }
@@ -301,9 +320,8 @@ namespace Caseomatic.Net
                             }
                             else
                             {
-                                TServerPacket packet;
-                                lock (commModuleLock)
-                                    packet = communicationModule.ConvertReceive(packetReceivingBuffer);
+                                var commModule = communicationModule;
+                                TServerPacket packet = commModule.ConvertReceive(packetReceivingBuffer);
 
                                 receivePacketsSynchronizationStack.Push(packet);
                                 StartReceivePacketLoop();
@@ -316,6 +334,10 @@ namespace Caseomatic.Net
                     Console.WriteLine("Receiving asynchronously produced an exception: " + ex.Message);
                     HeartbeatConnection(true);
                 }
+                catch(StackOverflowException ex)
+                {
+                    Console.WriteLine(ex.ToString());
+                }
                 finally
                 {
                     StartReceivePacketLoop();
@@ -323,51 +345,29 @@ namespace Caseomatic.Net
             }
         }
 
-        private void StartSendPacket(TClientPacket packet)
-        {
-            try
-            {
-                byte[] bytes;
-                lock (commModuleLock)
-                    bytes = communicationModule.ConvertSend(packet);
-
-                socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, (result) =>
-                    {
-                        var sentBytes = socket.EndSend(result);
-
-                        if (sentBytes == 0)
-                        {
-                            Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning.");
-                            HeartbeatConnection(false);
-                        }
-                    }, null);
-            }
-            catch (SocketException ex)
-                when(ex.SocketErrorCode != SocketError.Interrupted)
-            {
-                Console.WriteLine("Sending produced an exception: " + ex.Message);
-                HeartbeatConnection(true);
-            }
-        }
-
         /// <summary>
-        /// Repairs the connection by disconnecting, sending a ping and reconnecting under the same circumstances, heartbeating to check if it worked.
+        /// Repairs the connection by disconnecting, sending a ping and reconnecting under the same circumstances and heartbeating to check if it worked.
         /// </summary>
         private void RepairConnection()
         {
             var remoteEndPoint = ServerEndPoint;
             Disconnect();
-
+            
             repairPing.SendAsync(remoteEndPoint.Address, 1000, remoteEndPoint);
         }
         private void OnRepairPingCompleted(object sender, PingCompletedEventArgs e)
         {
             if (e.Reply.Status == IPStatus.Success)
             {
-                Console.WriteLine("Reconnecting to the server.");
+                Connect((IPEndPoint)e.UserState);
+                if (HeartbeatConnection(false))
+                {
 
-                Connect(((IPEndPoint)e.UserState));
-                HeartbeatConnection(false);
+                    Console.WriteLine("Reconnected to the server.");
+                    isConnectionRepaired = true;
+                }
+                else
+                    DisconnectLost();
             }
             else
             {
