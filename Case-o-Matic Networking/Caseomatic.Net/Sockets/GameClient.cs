@@ -21,7 +21,6 @@ namespace Caseomatic.Net
         private ConcurrentStack<TServerPacket> receivePacketsUdpSynchronizationStack;
         private object udpClientReceiveLockObj;
         private byte[] udpClientReceiveBuffer;
-        private Thread udpReceiveThread;
 
         public GameClient(int port, IPAddress multicastAddress)
             : base(port)
@@ -67,11 +66,14 @@ namespace Caseomatic.Net
 
         protected override void OnConnect(IPEndPoint serverEndPoint)
         {
-            udpReceiveThread = new Thread(ReceiveMulticastPacketsLoop);
-            udpReceiveThread.Start();
-
+            StartReceiveMulticastPackets();
             base.OnConnect(serverEndPoint);
         } // Joining the receive-thread to stop it is not done in OnDisconnect as the thread should run out naturally
+
+        private void StartReceiveMulticastPackets()
+        {
+            
+        }
 
         private void ReceiveMulticastPacketsLoop()
         {

@@ -320,8 +320,12 @@ namespace Caseomatic.Net
                             }
                             else
                             {
-                                var commModule = communicationModule;
-                                TServerPacket packet = commModule.ConvertReceive(packetReceivingBuffer);
+                                TServerPacket packet;
+                                lock (commModuleLock)
+                                {
+                                    var commModule = communicationModule;
+                                    packet = commModule.ConvertReceive(packetReceivingBuffer);
+                                }
 
                                 receivePacketsSynchronizationStack.Push(packet);
                                 StartReceivePacketLoop();
