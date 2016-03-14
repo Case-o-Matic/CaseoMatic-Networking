@@ -43,11 +43,11 @@ namespace Caseomatic.Net
             get { return (IPEndPoint)server.LocalEndpoint; }
         }
 
-        private ICommunicationModule<TClientPacket, TServerPacket> communicationModule;
+        private CommunicationModule<TClientPacket, TServerPacket> communicationModule;
         /// <summary>
         /// The communication module that controls the conversion from bytes to packets and vice versa.
         /// </summary>
-        public ICommunicationModule<TClientPacket, TServerPacket> CommunicationModule
+        public CommunicationModule<TClientPacket, TServerPacket> CommunicationModule
         {
             get
             {

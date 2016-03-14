@@ -35,16 +35,16 @@ namespace Caseomatic.Net
         private byte[] packetReceivingBuffer;
         private readonly int port;
         private bool isConnectionLost, isConnectionRepaired;
-        private object commModuleLock;
+        private object socketLock;
         private Ping repairPing;
 
         private readonly ConcurrentStack<TServerPacket> receivePacketsSynchronizationStack;
 
-        private ICommunicationModule<TServerPacket, TClientPacket> communicationModule;
+        private CommunicationModule<TServerPacket, TClientPacket> communicationModule;
         /// <summary>
         /// The communication module that controls the conversion from bytes to packets and vice versa.
         /// </summary>
-        public ICommunicationModule<TServerPacket, TClientPacket> CommunicationModule
+        public CommunicationModule<TServerPacket, TClientPacket> CommunicationModule
         {
             get
             {
@@ -56,7 +56,7 @@ namespace Caseomatic.Net
             }
         }
 
-        private bool isConnected;
+        private volatile bool isConnected;
         /// <summary>
         /// Returns if the client is currently connected. Updated by the Connect and Disconnect methods.
         /// </summary>
@@ -89,7 +89,6 @@ namespace Caseomatic.Net
 
             receivePacketsSynchronizationStack = new ConcurrentStack<TServerPacket>();
             communicationModule = new DefaultCommunicationModule<TServerPacket, TClientPacket>();
-            commModuleLock = new object();
 
             repairPing = new Ping();
             repairPing.PingCompleted += OnRepairPingCompleted;
@@ -166,13 +165,16 @@ namespace Caseomatic.Net
         {
             try
             {
-                socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                socket.Bind(new IPEndPoint(IPAddress.Any, port));
+                lock (socketLock)
+                {
+                    socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    socket.Bind(new IPEndPoint(IPAddress.Any, port));
 
-                socket.ConfigureInitialSocket();
-                socket.Connect(serverEndPoint);
+                    socket.ConfigureInitialSocket();
+                    socket.Connect(serverEndPoint);
 
-                packetReceivingBuffer = new byte[socket.ReceiveBufferSize];
+                    packetReceivingBuffer = new byte[socket.ReceiveBufferSize];
+                }
 
                 isConnected = true;
                 StartReceivePacketLoop();
@@ -182,7 +184,7 @@ namespace Caseomatic.Net
                 Console.WriteLine("Connecting to " + serverEndPoint.ToString() +
                     " resulted in a problem: " + ex.SocketErrorCode + "\n" + ex.Message);
 
-                Disconnect();
+                HeartbeatConnection(true);
             }
         }
 
@@ -190,8 +192,11 @@ namespace Caseomatic.Net
         {
             try
             {
-                isConnected = false;
-                socket.Close(); // Or use socket.Disconnect(true) instead of close/null?
+                lock (socketLock)
+                {
+                    isConnected = false;
+                    socket.Close(); // Or use socket.Disconnect(true) instead of close/null?
+                }
 
                 Console.WriteLine("Disconnected from the server");
             }
@@ -215,7 +220,8 @@ namespace Caseomatic.Net
                     Console.WriteLine("Heartbeating server...");
 
                     bool isReallyConnected;
-                    isReallyConnected = socket.IsConnectionValid();
+                    lock (socketLock)
+                        isReallyConnected = socket.IsConnectionValid();
 
                     if (!isReallyConnected)
                     {
@@ -251,11 +257,7 @@ namespace Caseomatic.Net
                 if (isConnected)
                 {
                     byte[] bytes;
-                    lock (commModuleLock)
-                    {
-                        var commModule = communicationModule;
-                        bytes = commModule.ConvertSend(packet);
-                    }
+                    bytes = communicationModule.ConvertSend(packet);
 
                     //var sentBytes = socket.Send(bytes);
                     //if (sentBytes == 0)
@@ -263,25 +265,27 @@ namespace Caseomatic.Net
                     //    Console.WriteLine("An error occured: Sent 0 bytes to server.");
                     //    HeartbeatConnection(false);
                     //}
-
-                    socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, (result) =>
+                    lock (socketLock)
                     {
-                        var sentBytes = socket.EndSend(result);
-                        //if (error != SocketError.Success)
-                        //{
-                        //    if (sentBytes == 0)
-                        //    {
-                        //        Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning." +
-                        //            " (" + error  + ")");
-                        //        HeartbeatConnection(false);
-                        //    }
-                        //    else
-                        //    {
-                        //        Console.WriteLine("An error occured while sending: " + error);
-                        //        HeartbeatConnection(true);
-                        //    }
-                        //}
-                    }, null);
+                        socket.BeginSend(bytes, 0, bytes.Length, SocketFlags.None, (result) =>
+                        {
+                            var sentBytes = socket.EndSend(result);
+                            //if (error != SocketError.Success)
+                            //{
+                            //    if (sentBytes == 0)
+                            //    {
+                            //        Console.WriteLine("Sent 0 bytes to server: Connection dropped on serverside or malfunctioning." +
+                            //            " (" + error  + ")");
+                            //        HeartbeatConnection(false);
+                            //    }
+                            //    else
+                            //    {
+                            //        Console.WriteLine("An error occured while sending: " + error);
+                            //        HeartbeatConnection(true);
+                            //    }
+                            //}
+                        }, null);
+                    }
                 }
             }
             catch (SocketException ex) // TODO: Improve exception-catching
@@ -308,29 +312,29 @@ namespace Caseomatic.Net
             {
                 try
                 {
-                    socket.BeginReceive(packetReceivingBuffer, 0, packetReceivingBuffer.Length, SocketFlags.None,
-                        (result) =>
-                        {
-                            var receivedBytes = socket.EndReceive(result);
+                    lock (socketLock)
+                    {
+                        socket.BeginReceive(packetReceivingBuffer, 0, packetReceivingBuffer.Length, SocketFlags.None,
+                            (result) =>
+                            {
+                                var receivedBytes = socket.EndReceive(result);
 
-                            if (receivedBytes == 0)
-                            {
-                                Console.WriteLine("Received 0 bytes from server: Connection dropped. Buffered received-bytes length: " + packetReceivingBuffer.Length);
-                                DisconnectLost();
-                            }
-                            else
-                            {
-                                TServerPacket packet;
-                                lock (commModuleLock)
+                                if (receivedBytes == 0)
                                 {
-                                    var commModule = communicationModule;
-                                    packet = commModule.ConvertReceive(packetReceivingBuffer);
+                                    Console.WriteLine("Received 0 bytes from server: Connection dropped. Buffered received-bytes length: " + packetReceivingBuffer.Length);
+                                    DisconnectLost();
                                 }
+                                else
+                                {
+                                    TServerPacket packet;
+                                    packet = communicationModule.ConvertReceive(packetReceivingBuffer);
 
-                                receivePacketsSynchronizationStack.Push(packet);
-                                StartReceivePacketLoop();
-                            }
-                        }, null);
+                                    receivePacketsSynchronizationStack.Push(packet);
+                                }
+                                }, null);
+                    }
+
+                    StartReceivePacketLoop();
                 }
                 catch (SocketException ex)
                     when(ex.SocketErrorCode != SocketError.Interrupted && ex.SocketErrorCode != SocketError.TimedOut) // TODO: Improve exception-catching
@@ -354,9 +358,11 @@ namespace Caseomatic.Net
         /// </summary>
         private void RepairConnection()
         {
-            var remoteEndPoint = ServerEndPoint;
+            IPEndPoint remoteEndPoint;
+            lock (socketLock)
+                remoteEndPoint = ServerEndPoint;
+
             Disconnect();
-            
             repairPing.SendAsync(remoteEndPoint.Address, 1000, remoteEndPoint);
         }
         private void OnRepairPingCompleted(object sender, PingCompletedEventArgs e)

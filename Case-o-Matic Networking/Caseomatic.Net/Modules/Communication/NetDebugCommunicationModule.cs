@@ -9,10 +9,10 @@ using System.Threading;
 namespace Caseomatic.Net
 {
     public class NetDebugCommunicationModule<TReceivePacket, TSendPacket>
-        : ICommunicationModule<TReceivePacket, TSendPacket> where TReceivePacket : IPacket where TSendPacket : IPacket
+        : CommunicationModule<TReceivePacket, TSendPacket> where TReceivePacket : IPacket where TSendPacket : IPacket
     {
         private static Random random = new Random(DateTime.Now.Millisecond);
-        private readonly ICommunicationModule<TReceivePacket, TSendPacket> underlyingCommModule;
+        private readonly CommunicationModule<TReceivePacket, TSendPacket> underlyingCommModule;
 
         private NetDebugProperties properties;
         public NetDebugProperties Properties
@@ -48,7 +48,7 @@ namespace Caseomatic.Net
             get { return receivedPacketsSizeGraph; }
         }
 
-        public NetDebugCommunicationModule(ICommunicationModule<TReceivePacket, TSendPacket> underlyingCommModule)
+        public NetDebugCommunicationModule(CommunicationModule<TReceivePacket, TSendPacket> underlyingCommModule)
         {
             this.underlyingCommModule = underlyingCommModule;
             properties = new NetDebugProperties();
@@ -59,7 +59,7 @@ namespace Caseomatic.Net
             receivedPacketsSizeGraph = new LineGraph(false);
         }
 
-        public TReceivePacket ConvertReceive(byte[] bytes)
+        public override TReceivePacket ConvertReceive(byte[] bytes)
         {
             var stopwatch = Stopwatch.StartNew();
             bytes = ApplyReceiveProperties(bytes);
@@ -79,7 +79,7 @@ namespace Caseomatic.Net
             return packet;
         }
 
-        public byte[] ConvertSend(TSendPacket packet)
+        public override byte[] ConvertSend(TSendPacket packet)
         {
             packet = ApplySendProperties(packet);
 

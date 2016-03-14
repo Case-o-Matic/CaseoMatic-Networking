@@ -34,6 +34,9 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="CaseoMatic.Util">
+      <HintPath>..\..\..\CaseoMatic-Utility\Case-o-Matic Utility Project\CaseoMatic.Util\bin\Debug\CaseoMatic.Util.dll</HintPath>
+    </Reference>
     <Reference Include="NetSerializer, Version=4.0.0.0, Culture=neutral, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\Dependencies\NetSerializer.dll</HintPath>
@@ -44,8 +47,7 @@
   <ItemGroup>
     <Compile Include="Modules\Communication\DefaultCommunicationModule.cs" />
     <Compile Include="Modules\Communication\NetDebugCommunicationModule.cs" />
-    <Compile Include="Modules\IModule.cs" />
-    <Compile Include="Modules\ICommunicationModule.cs" />
+    <Compile Include="Modules\CommunicationModule.cs" />
     <Compile Include="Packet Interfaces.cs" />
     <Compile Include="PacketConverter.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -53,8 +55,6 @@
     <Compile Include="Sockets\GameClient.cs" />
     <Compile Include="Sockets\GameServer.cs" />
     <Compile Include="Sockets\Server.cs" />
-    <Compile Include="Utility\ConcurrentDictionary.cs" />
-    <Compile Include="Utility\ConcurrentStack.cs" />
     <Compile Include="Utility\Cryptor.cs" />
     <Compile Include="Utility\HuffmanCompressor.cs" />
     <Compile Include="Utility\LineGraph.cs" />

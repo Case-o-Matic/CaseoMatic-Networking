@@ -6,14 +6,14 @@ using System.Text;
 namespace Caseomatic.Net
 {
     public class DefaultCommunicationModule<TReceivePacket, TSendPacket>
-        : ICommunicationModule<TReceivePacket, TSendPacket> where TReceivePacket : IPacket where TSendPacket : IPacket
+        : CommunicationModule<TReceivePacket, TSendPacket> where TReceivePacket : IPacket where TSendPacket : IPacket
     {
-        public TReceivePacket ConvertReceive(byte[] bytes)
+        public override TReceivePacket ConvertReceive(byte[] bytes)
         {
             return PacketConverter.ToPacket<TReceivePacket>(bytes);
         }
 
-        public byte[] ConvertSend(TSendPacket packet)
+        public override byte[] ConvertSend(TSendPacket packet)
         {
             return PacketConverter.ToBytes(packet);
         }
