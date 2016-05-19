@@ -6,8 +6,7 @@ using System.Text;
 
 namespace Caseomatic.Net
 {
-    [Synchronization]
-    public abstract class CommunicationModule<TReceivePacket, TSendPacket> : ContextBoundObject
+    public abstract class CommunicationModule<TReceivePacket, TSendPacket>
         where TReceivePacket : IPacket where TSendPacket : IPacket
     {
         public abstract TReceivePacket ConvertReceive(byte[] bytes);

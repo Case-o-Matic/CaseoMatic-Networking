@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Linq;
 using Caseomatic.Net.Utility;
+using Caseomatic.Util;
 
 namespace Caseomatic.Net
 {
@@ -235,7 +236,7 @@ namespace Caseomatic.Net
         {
             isHosting = false;
             server.Stop();
-            
+
             var connectedConnectionIds = clientConnections.AllValues.ToArray();
             foreach (var connectionId in connectedConnectionIds)
             {
